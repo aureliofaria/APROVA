@@ -27,7 +27,7 @@ export default function Dashboard() {
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'Total de Solicitações', value: stats.total, color: 'bg-blue-50 text-blue-700', icon: '📋' },
+          { label: 'Total de Solicitações', value: stats.total, color: 'bg-golplus-blue-50 text-golplus-blue-700', icon: '📋' },
           { label: 'Em Andamento', value: stats.pending, color: 'bg-yellow-50 text-yellow-700', icon: '⏳' },
           { label: 'Aprovadas/Concluídas', value: stats.approved, color: 'bg-green-50 text-green-700', icon: '✅' },
           { label: 'Minhas Tarefas', value: stats.myTasks, color: 'bg-purple-50 text-purple-700', icon: '📌' },
@@ -47,7 +47,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl border border-gray-200">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <h2 className="font-semibold text-gray-900">Solicitações Recentes</h2>
-            <Link to="/requests" className="text-sm text-blue-600 hover:text-blue-800">Ver todas</Link>
+            <Link to="/requests" className="text-sm text-golplus-blue-600 hover:text-golplus-blue-800">Ver todas</Link>
           </div>
           <div className="divide-y divide-gray-50">
             {recent.length === 0 && (
@@ -73,7 +73,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl border border-gray-200">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <h2 className="font-semibold text-gray-900">Minhas Tarefas Pendentes</h2>
-            <Link to="/tasks" className="text-sm text-blue-600 hover:text-blue-800">Ver todas</Link>
+            <Link to="/tasks" className="text-sm text-golplus-blue-600 hover:text-golplus-blue-800">Ver todas</Link>
           </div>
           <div className="divide-y divide-gray-50">
             {pendingTasks.length === 0 && (

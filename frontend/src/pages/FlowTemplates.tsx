@@ -27,7 +27,7 @@ export default function FlowTemplates() {
         title="Modelos de Fluxo"
         subtitle="Configure os fluxos de aprovação do sistema"
         actions={
-          <Link to="/flows/new" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+          <Link to="/flows/new" className="px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700">
             + Criar Fluxo
           </Link>
         }
@@ -47,7 +47,7 @@ export default function FlowTemplates() {
                   onChange={(e) => toggleMutation.mutate({ id: flow.id, isActive: e.target.checked })}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-golplus-blue-600"></div>
               </label>
             </div>
             <h3 className="font-semibold text-gray-900 mb-1">{flow.name}</h3>
@@ -73,7 +73,7 @@ export default function FlowTemplates() {
       {!isLoading && flows.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <p className="text-gray-500 text-sm">Nenhum fluxo cadastrado</p>
-          <Link to="/flows/new" className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+          <Link to="/flows/new" className="mt-4 inline-block px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700">
             Criar Primeiro Fluxo
           </Link>
         </div>

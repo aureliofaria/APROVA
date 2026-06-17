@@ -7,7 +7,10 @@ const router = Router();
 router.get('/', authenticate, async (_req: AuthRequest, res: Response) => {
   try {
     const flows = await prisma.flowTemplate.findMany({
-      include: { _count: { select: { steps: true } } },
+      include: {
+        _count: { select: { steps: true } },
+        sector: { select: { id: true, name: true } },
+      },
       orderBy: { name: 'asc' },
     });
     res.json(flows);
@@ -20,7 +23,16 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const flow = await prisma.flowTemplate.findUnique({
       where: { id: req.params.id },
-      include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } },
+      include: {
+        sector: { select: { id: true, name: true } },
+        steps: {
+          orderBy: { order: 'asc' },
+          include: {
+            authLevels: true,
+            handlingSector: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
     if (!flow) { res.status(404).json({ error: 'Fluxo não encontrado' }); return; }
     res.json(flow);
@@ -31,9 +43,11 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 
 router.post('/', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, type, isActive } = req.body;
+    const { name, description, type, scope, sectorId, isActive } = req.body;
     if (!name || !type) { res.status(400).json({ error: 'Nome e tipo são obrigatórios' }); return; }
-    const flow = await prisma.flowTemplate.create({ data: { name, description, type, isActive: isActive ?? true } });
+    const flow = await prisma.flowTemplate.create({
+      data: { name, description, type, scope: scope ?? 'INTRA', sectorId: sectorId || null, isActive: isActive ?? true },
+    });
     res.status(201).json(flow);
   } catch {
     res.status(500).json({ error: 'Erro ao criar fluxo' });
@@ -42,11 +56,14 @@ router.post('/', authenticate, requireRole('ADMIN'), async (req: AuthRequest, re
 
 router.put('/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, type, isActive } = req.body;
+    const { name, description, type, scope, sectorId, isActive } = req.body;
     const flow = await prisma.flowTemplate.update({
       where: { id: req.params.id },
-      data: { name, description, type, isActive },
-      include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } },
+      data: { name, description, type, scope, sectorId: sectorId || null, isActive },
+      include: {
+        sector: { select: { id: true, name: true } },
+        steps: { orderBy: { order: 'asc' }, include: { authLevels: true, handlingSector: { select: { id: true, name: true } } } },
+      },
     });
     res.json(flow);
   } catch {
@@ -66,11 +83,16 @@ router.delete('/:id', authenticate, requireRole('ADMIN'), async (req: AuthReques
 // Steps
 router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, requiredRole, requiresAttachment, deadlineHours, order } = req.body;
+    const { name, description, requiredRole, requiresAttachment, deadlineHours, order, handlingSectorId } = req.body;
     const maxOrder = await prisma.flowStep.aggregate({ where: { flowTemplateId: req.params.id }, _max: { order: true } });
     const nextOrder = order ?? ((maxOrder._max.order ?? -1) + 1);
     const step = await prisma.flowStep.create({
-      data: { flowTemplateId: req.params.id, name, description, requiredRole, requiresAttachment: requiresAttachment ?? false, deadlineHours, order: nextOrder },
+      data: {
+        flowTemplateId: req.params.id, name, description, requiredRole,
+        requiresAttachment: requiresAttachment ?? false, deadlineHours,
+        order: nextOrder, handlingSectorId: handlingSectorId || null,
+      },
+      include: { handlingSector: { select: { id: true, name: true } } },
     });
     res.status(201).json(step);
   } catch {
@@ -80,10 +102,11 @@ router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRe
 
 router.put('/:id/steps/:stepId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, requiredRole, requiresAttachment, deadlineHours, order } = req.body;
+    const { name, description, requiredRole, requiresAttachment, deadlineHours, order, handlingSectorId } = req.body;
     const step = await prisma.flowStep.update({
       where: { id: req.params.stepId },
-      data: { name, description, requiredRole, requiresAttachment, deadlineHours, order },
+      data: { name, description, requiredRole, requiresAttachment, deadlineHours, order, handlingSectorId: handlingSectorId || null },
+      include: { handlingSector: { select: { id: true, name: true } } },
     });
     res.json(step);
   } catch {

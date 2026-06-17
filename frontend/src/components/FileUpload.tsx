@@ -49,7 +49,7 @@ export default function FileUpload({ onUpload, accept, maxFiles = 10, label = 'A
       <div
         {...getRootProps()}
         className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-          isDragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+          isDragActive ? 'border-golplus-blue-400 bg-golplus-blue-50' : 'border-gray-300 hover:border-gray-400'
         }`}
       >
         <input {...getInputProps()} />
@@ -87,7 +87,7 @@ export default function FileUpload({ onUpload, accept, maxFiles = 10, label = 'A
         <button
           onClick={handleUpload}
           disabled={uploading}
-          className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full py-2 px-4 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {uploading ? 'Enviando...' : `Enviar ${files.length} arquivo(s)`}
         </button>

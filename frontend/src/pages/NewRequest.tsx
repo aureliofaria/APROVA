@@ -11,7 +11,7 @@ import type { FlowTemplate } from '../types';
 const flowTypes = [
   { type: 'ONBOARDING', label: 'Admissão de Colaborador', desc: 'Processo de admissão de novo funcionário', icon: '👤', color: 'border-green-200 hover:border-green-400' },
   { type: 'OFFBOARDING', label: 'Desligamento de Colaborador', desc: 'Processo de offboarding', icon: '🚪', color: 'border-red-200 hover:border-red-400' },
-  { type: 'PAYMENT', label: 'Solicitação de Pagamento', desc: 'Aprovação de pagamentos', icon: '💳', color: 'border-blue-200 hover:border-blue-400' },
+  { type: 'PAYMENT', label: 'Solicitação de Pagamento', desc: 'Aprovação de pagamentos', icon: '💳', color: 'border-golplus-blue-200 hover:border-golplus-blue-400' },
   { type: 'PURCHASE', label: 'Solicitação de Compra', desc: 'Aprovação de compras e aquisições', icon: '🛒', color: 'border-purple-200 hover:border-purple-400' },
 ];
 
@@ -89,10 +89,10 @@ export default function NewRequest() {
       <div className="flex items-center gap-2 mb-8">
         {Array.from({ length: totalSteps }, (_, i) => i + 1).map((n) => (
           <div key={n} className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${n < step ? 'bg-blue-600 text-white' : n === step ? 'bg-blue-600 text-white ring-4 ring-blue-100' : 'bg-gray-200 text-gray-500'}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${n < step ? 'bg-golplus-blue-600 text-white' : n === step ? 'bg-golplus-blue-600 text-white ring-4 ring-golplus-blue-100' : 'bg-gray-200 text-gray-500'}`}>
               {n < step ? '✓' : n}
             </div>
-            {n < totalSteps && <div className={`h-0.5 w-8 ${n < step ? 'bg-blue-600' : 'bg-gray-200'}`} />}
+            {n < totalSteps && <div className={`h-0.5 w-8 ${n < step ? 'bg-golplus-blue-600' : 'bg-gray-200'}`} />}
           </div>
         ))}
         <div className="ml-4 text-sm text-gray-500">
@@ -110,7 +110,7 @@ export default function NewRequest() {
                 <button
                   key={ft.type}
                   onClick={() => { setSelectedType(ft.type); setSelectedFlow(null); }}
-                  className={`p-5 border-2 rounded-xl text-left transition-all ${selectedType === ft.type ? 'border-blue-500 bg-blue-50' : ft.color + ' bg-white'}`}
+                  className={`p-5 border-2 rounded-xl text-left transition-all ${selectedType === ft.type ? 'border-golplus-blue-500 bg-golplus-blue-50' : ft.color + ' bg-white'}`}
                 >
                   <div className="text-3xl mb-3">{ft.icon}</div>
                   <div className="font-semibold text-gray-900">{ft.label}</div>
@@ -131,7 +131,7 @@ export default function NewRequest() {
                 <button
                   key={flow.id}
                   onClick={() => setSelectedFlow(flow)}
-                  className={`w-full p-4 border-2 rounded-xl text-left transition-all ${selectedFlow?.id === flow.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+                  className={`w-full p-4 border-2 rounded-xl text-left transition-all ${selectedFlow?.id === flow.id ? 'border-golplus-blue-500 bg-golplus-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
                 >
                   <div className="font-medium text-gray-900">{flow.name}</div>
                   {flow.description && <div className="text-sm text-gray-500 mt-1">{flow.description}</div>}
@@ -156,7 +156,7 @@ export default function NewRequest() {
                   type="text"
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
                   placeholder="Título da solicitação"
                 />
               </div>
@@ -166,7 +166,7 @@ export default function NewRequest() {
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
                   placeholder="Descreva a solicitação..."
                 />
               </div>
@@ -174,15 +174,15 @@ export default function NewRequest() {
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Colaborador</label>
-                    <input type="text" value={form.targetEmployee} onChange={(e) => setForm({ ...form, targetEmployee: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Nome completo" />
+                    <input type="text" value={form.targetEmployee} onChange={(e) => setForm({ ...form, targetEmployee: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome completo" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Departamento</label>
-                    <input type="text" value={form.targetDepartment} onChange={(e) => setForm({ ...form, targetDepartment: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Departamento de destino" />
+                    <input type="text" value={form.targetDepartment} onChange={(e) => setForm({ ...form, targetDepartment: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Departamento de destino" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Data de Início</label>
-                    <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" />
                   </div>
                 </>
               )}
@@ -190,19 +190,19 @@ export default function NewRequest() {
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Valor (R$) *</label>
-                    <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0,00" />
+                    <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="0,00" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Fornecedor</label>
-                    <input type="text" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Nome do fornecedor" />
+                    <input type="text" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome do fornecedor" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Centro de Custo</label>
-                    <input type="text" value={form.costCenter} onChange={(e) => setForm({ ...form, costCenter: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: TI-001" />
+                    <input type="text" value={form.costCenter} onChange={(e) => setForm({ ...form, costCenter: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Ex: TI-001" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Justificativa *</label>
-                    <textarea value={form.justification} onChange={(e) => setForm({ ...form, justification: e.target.value })} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Justifique a necessidade..." />
+                    <textarea value={form.justification} onChange={(e) => setForm({ ...form, justification: e.target.value })} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Justifique a necessidade..." />
                   </div>
                 </>
               )}
@@ -233,7 +233,7 @@ export default function NewRequest() {
               <div className="flex justify-between text-sm"><span className="text-gray-500">Tipo:</span><FlowTypeBadge type={selectedType} /></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Fluxo:</span><span className="font-medium">{selectedFlow?.name}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Título:</span><span className="font-medium">{form.title}</span></div>
-              {form.amount && <div className="flex justify-between text-sm"><span className="text-gray-500">Valor:</span><span className="font-medium text-blue-700">R$ {parseFloat(form.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>}
+              {form.amount && <div className="flex justify-between text-sm"><span className="text-gray-500">Valor:</span><span className="font-medium text-golplus-blue-700">R$ {parseFloat(form.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>}
               {form.targetEmployee && <div className="flex justify-between text-sm"><span className="text-gray-500">Colaborador:</span><span className="font-medium">{form.targetEmployee}</span></div>}
               {pendingFiles.length > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Anexos:</span><span className="font-medium">{pendingFiles.length} arquivo(s)</span></div>}
             </div>
@@ -254,7 +254,7 @@ export default function NewRequest() {
             <button
               onClick={() => setStep((s) => s + 1)}
               disabled={!canNext()}
-              className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-5 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Próximo
             </button>

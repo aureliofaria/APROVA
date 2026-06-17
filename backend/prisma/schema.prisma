@@ -15,13 +15,16 @@ model User {
   role         String      @default("USER")
   departmentId String?
   department   Department? @relation(fields: [departmentId], references: [id])
+  sectorId     String?
+  sector       Sector?     @relation("SectorMembers", fields: [sectorId], references: [id])
   isActive     Boolean     @default(true)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
-  initiatedRequests Request[]     @relation("Initiator")
+  initiatedRequests Request[]      @relation("Initiator")
   assignedTasks     RequestTask[]
   approvals         Approval[]
+  sectorRoles       SectorMember[]
 }
 
 model Department {
@@ -31,11 +34,41 @@ model Department {
   users     User[]
 }
 
+model Sector {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members       SectorMember[]
+  users         User[]         @relation("SectorMembers")
+  flowTemplates FlowTemplate[] @relation("FlowSector")
+  flowSteps     FlowStep[]     @relation("StepSector")
+  requests      Request[]      @relation("RequestSector")
+}
+
+model SectorMember {
+  id        String   @id @default(cuid())
+  sectorId  String
+  sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // LIDER, PROTETOR
+  createdAt DateTime @default(now())
+
+  @@unique([sectorId, userId, role])
+}
+
 model FlowTemplate {
   id          String     @id @default(cuid())
   name        String
   description String?
   type        String
+  scope       String     @default("INTRA") // INTRA, INTER
+  sectorId    String?
+  sector      Sector?    @relation("FlowSector", fields: [sectorId], references: [id])
   isActive    Boolean    @default(true)
   steps       FlowStep[]
   requests    Request[]
@@ -53,6 +86,8 @@ model FlowStep {
   requiredRole       String?
   requiresAttachment Boolean              @default(false)
   deadlineHours      Int?
+  handlingSectorId   String?
+  handlingSector     Sector?              @relation("StepSector", fields: [handlingSectorId], references: [id])
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   createdAt          DateTime             @default(now())
@@ -76,6 +111,8 @@ model Request {
   flow             FlowTemplate  @relation(fields: [flowId], references: [id])
   initiatorId      String
   initiator        User          @relation("Initiator", fields: [initiatorId], references: [id])
+  sectorId         String?
+  sector           Sector?       @relation("RequestSector", fields: [sectorId], references: [id])
   title            String
   description      String?
   status           String        @default("PENDING")

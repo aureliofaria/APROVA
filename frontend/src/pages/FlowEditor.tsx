@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { flowsApi } from '../services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { flowsApi, sectorsApi } from '../services/api';
 import Header from '../components/Header';
 import toast from 'react-hot-toast';
 import type { FlowStep, AuthorizationLevel } from '../types';
@@ -30,15 +30,21 @@ export default function FlowEditor() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState('ONBOARDING');
+  const [scope, setScope] = useState<'INTRA' | 'INTER'>('INTRA');
+  const [sectorId, setSectorId] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [steps, setSteps] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const { data: sectors = [] } = useQuery({ queryKey: ['sectors'], queryFn: sectorsApi.getAll });
 
   useEffect(() => {
     if (existingFlow) {
       setName(existingFlow.name);
       setDescription(existingFlow.description || '');
       setType(existingFlow.type);
+      setScope((existingFlow.scope as 'INTRA' | 'INTER') || 'INTRA');
+      setSectorId(existingFlow.sectorId || '');
       setIsActive(existingFlow.isActive);
       setSteps(existingFlow.steps || []);
     }
@@ -53,6 +59,7 @@ export default function FlowEditor() {
       requiredRole: 'USER',
       requiresAttachment: false,
       deadlineHours: '',
+      handlingSectorId: '',
       order: steps.length,
       authLevels: [],
     }]);
@@ -99,10 +106,10 @@ export default function FlowEditor() {
     try {
       let flowId = id;
       if (isNew) {
-        const flow = await flowsApi.create({ name, description, type, isActive });
+        const flow = await flowsApi.create({ name, description, type: type as any, scope, sectorId: sectorId || undefined, isActive });
         flowId = flow.id;
       } else {
-        await flowsApi.update(id!, { name, description, type, isActive });
+        await flowsApi.update(id!, { name, description, type: type as any, scope, sectorId: sectorId || undefined, isActive });
       }
 
       // Handle steps
@@ -114,6 +121,7 @@ export default function FlowEditor() {
           requiredRole: step.requiredRole,
           requiresAttachment: step.requiresAttachment,
           deadlineHours: step.deadlineHours ? parseInt(step.deadlineHours) : null,
+          handlingSectorId: step.handlingSectorId || null,
           order: i,
         };
 
@@ -163,20 +171,47 @@ export default function FlowEditor() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Nome do fluxo" />
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome do fluxo" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-            <select value={type} onChange={(e) => setType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select value={type} onChange={(e) => setType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
               {flowTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+          {/* Escopo */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Escopo do Fluxo</label>
+            <div className="flex gap-2">
+              {[{ v: 'INTRA', label: 'Intra-setor', desc: 'Etapas dentro de um único setor' }, { v: 'INTER', label: 'Inter-setor', desc: 'Etapas cruzam diferentes setores' }].map((s) => (
+                <button
+                  key={s.v}
+                  type="button"
+                  onClick={() => setScope(s.v as 'INTRA' | 'INTER')}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-sm text-left transition-colors ${scope === s.v ? 'border-golplus-blue bg-golplus-blue-50 text-golplus-blue-700 font-medium' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+                >
+                  <div className="font-medium">{s.label}</div>
+                  <div className="text-xs opacity-70">{s.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Setor (para intra) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {scope === 'INTRA' ? 'Setor responsável' : 'Setor de origem'}
+            </label>
+            <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
+              <option value="">— Nenhum (todos os setores) —</option>
+              {sectors.filter((s) => s.isActive).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Descrição do fluxo..." />
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Descrição do fluxo..." />
           </div>
           <div className="flex items-center gap-2">
-            <input type="checkbox" id="isActive" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-gray-300 text-blue-600" />
+            <input type="checkbox" id="isActive" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-gray-300 text-golplus-blue-600" />
             <label htmlFor="isActive" className="text-sm font-medium text-gray-700">Fluxo ativo</label>
           </div>
         </div>
@@ -186,7 +221,7 @@ export default function FlowEditor() {
       <div className="space-y-4 mb-6">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700">Etapas do Fluxo</h2>
-          <button onClick={addStep} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">+ Adicionar Etapa</button>
+          <button onClick={addStep} className="px-3 py-1.5 bg-golplus-blue-600 text-white rounded-lg text-xs font-medium hover:bg-golplus-blue-700">+ Adicionar Etapa</button>
         </div>
 
         {steps.length === 0 && <div className="bg-gray-50 rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">Nenhuma etapa. Clique em "Adicionar Etapa".</div>}
@@ -194,7 +229,7 @@ export default function FlowEditor() {
         {steps.map((step, idx) => (
           <div key={step.id} className="bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center gap-3 mb-4">
-              <span className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-bold">{idx + 1}</span>
+              <span className="w-7 h-7 bg-golplus-blue-100 text-golplus-blue-700 rounded-full flex items-center justify-center text-sm font-bold">{idx + 1}</span>
               <h3 className="font-medium text-gray-900 flex-1">{step.name || 'Nova etapa'}</h3>
               <div className="flex gap-1">
                 <button onClick={() => moveStep(idx, -1)} disabled={idx === 0} className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30">↑</button>
@@ -206,24 +241,41 @@ export default function FlowEditor() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Nome da Etapa *</label>
-                <input type="text" value={step.name} onChange={(e) => updateStep(idx, 'name', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={step.name} onChange={(e) => updateStep(idx, 'name', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Perfil Responsável</label>
-                <select value={step.requiredRole || 'USER'} onChange={(e) => updateStep(idx, 'requiredRole', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select value={step.requiredRole || 'USER'} onChange={(e) => updateStep(idx, 'requiredRole', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
                   {roles.map((r) => <option key={r} value={r}>{roleLabels[r]}</option>)}
                 </select>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Descrição</label>
-                <input type="text" value={step.description || ''} onChange={(e) => updateStep(idx, 'description', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={step.description || ''} onChange={(e) => updateStep(idx, 'description', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Prazo (horas)</label>
-                <input type="number" value={step.deadlineHours || ''} onChange={(e) => updateStep(idx, 'deadlineHours', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: 48" />
+                <input type="number" value={step.deadlineHours || ''} onChange={(e) => updateStep(idx, 'deadlineHours', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Ex: 48" />
               </div>
+              {scope === 'INTER' && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    <span className="text-golplus-orange">⇄</span> Setor desta etapa
+                  </label>
+                  <select
+                    value={step.handlingSectorId || ''}
+                    onChange={(e) => updateStep(idx, 'handlingSectorId', e.target.value)}
+                    className="w-full px-3 py-2 border border-golplus-orange-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-orange-300"
+                  >
+                    <option value="">— Qualquer setor —</option>
+                    {sectors.filter((s) => s.isActive).map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex items-center gap-2 pt-5">
-                <input type="checkbox" id={`att-${idx}`} checked={step.requiresAttachment} onChange={(e) => updateStep(idx, 'requiresAttachment', e.target.checked)} className="rounded border-gray-300 text-blue-600" />
+                <input type="checkbox" id={`att-${idx}`} checked={step.requiresAttachment} onChange={(e) => updateStep(idx, 'requiresAttachment', e.target.checked)} className="rounded border-gray-300 text-golplus-blue-600" />
                 <label htmlFor={`att-${idx}`} className="text-sm text-gray-700">Requer anexo</label>
               </div>
             </div>
@@ -232,7 +284,7 @@ export default function FlowEditor() {
             <div className="border-t border-gray-100 pt-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-medium text-gray-600">Alçadas de Autorização</span>
-                <button onClick={() => addAuthLevel(idx)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Adicionar Alçada</button>
+                <button onClick={() => addAuthLevel(idx)} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 font-medium">+ Adicionar Alçada</button>
               </div>
               <div className="space-y-3">
                 {(step.authLevels || []).map((lvl: any, lvlIdx: number) => (
@@ -240,29 +292,29 @@ export default function FlowEditor() {
                     <button onClick={() => removeAuthLevel(idx, lvlIdx)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-xs">✕</button>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Nome</label>
-                      <input type="text" value={lvl.name} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'name', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Ex: Até R$ 5.000" />
+                      <input type="text" value={lvl.name} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'name', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="Ex: Até R$ 5.000" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Valor mín.</label>
-                      <input type="number" value={lvl.minValue} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'minValue', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="0" />
+                      <input type="number" value={lvl.minValue} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'minValue', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="0" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Valor máx.</label>
-                      <input type="number" value={lvl.maxValue} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'maxValue', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="ilimitado" />
+                      <input type="number" value={lvl.maxValue} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'maxValue', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="ilimitado" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Aprovadores</label>
-                      <input type="number" min="1" value={lvl.requiredApprovers} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'requiredApprovers', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      <input type="number" min="1" value={lvl.requiredApprovers} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'requiredApprovers', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Perfil aprovador</label>
-                      <select value={lvl.approverRole} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'approverRole', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                      <select value={lvl.approverRole} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'approverRole', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
                         {roles.map((r) => <option key={r} value={r}>{roleLabels[r]}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Prazo (h)</label>
-                      <input type="number" value={lvl.deadlineHours || ''} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'deadlineHours', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      <input type="number" value={lvl.deadlineHours || ''} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'deadlineHours', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" />
                     </div>
                   </div>
                 ))}
@@ -274,7 +326,7 @@ export default function FlowEditor() {
 
       <div className="flex justify-end gap-3">
         <button onClick={() => navigate('/flows')} className="px-5 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">Cancelar</button>
-        <button onClick={handleSave} disabled={saving} className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        <button onClick={handleSave} disabled={saving} className="px-5 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50">
           {saving ? 'Salvando...' : isNew ? 'Criar Fluxo' : 'Salvar Alterações'}
         </button>
       </div>

@@ -11,6 +11,7 @@ import NewRequest from './pages/NewRequest';
 import MyTasks from './pages/MyTasks';
 import FlowTemplates from './pages/FlowTemplates';
 import FlowEditor from './pages/FlowEditor';
+import Setores from './pages/Setores';
 import Users from './pages/Users';
 
 const queryClient = new QueryClient({
@@ -41,6 +42,7 @@ function AppRoutes() {
         <Route path="/requests/new" element={<NewRequest />} />
         <Route path="/requests/:id" element={<RequestDetail />} />
         <Route path="/tasks" element={<MyTasks />} />
+        <Route path="/sectors" element={<ProtectedRoute adminOnly><Setores /></ProtectedRoute>} />
         <Route path="/flows" element={<ProtectedRoute adminOnly><FlowTemplates /></ProtectedRoute>} />
         <Route path="/flows/new" element={<ProtectedRoute adminOnly><FlowEditor /></ProtectedRoute>} />
         <Route path="/flows/:id/edit" element={<ProtectedRoute adminOnly><FlowEditor /></ProtectedRoute>} />

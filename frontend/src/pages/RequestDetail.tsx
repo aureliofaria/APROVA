@@ -24,7 +24,7 @@ function ActionModal({ title, onConfirm, onClose, action }: { title: string; onC
           onChange={(e) => setComments(e.target.value)}
           placeholder="Comentários (opcional)"
           rows={3}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
         />
         <div className="flex gap-3 mt-4">
           <button onClick={onClose} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Cancelar</button>
@@ -107,7 +107,7 @@ export default function RequestDetail() {
       )}
 
       <div className="mb-6">
-        <Link to="/requests" className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1 mb-4">
+        <Link to="/requests" className="text-sm text-golplus-blue-600 hover:text-golplus-blue-800 flex items-center gap-1 mb-4">
           ← Voltar para Solicitações
         </Link>
         <div className="flex items-start justify-between gap-4">
@@ -142,7 +142,7 @@ export default function RequestDetail() {
             <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
               <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
                 idx < request.currentStep ? 'bg-green-100 text-green-800' :
-                idx === request.currentStep ? 'bg-blue-100 text-blue-800 font-medium' :
+                idx === request.currentStep ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium' :
                 'bg-gray-100 text-gray-500'
               }`}>
                 <span>{idx < request.currentStep ? '✓' : idx === request.currentStep ? '→' : `${idx + 1}`}</span>
@@ -162,7 +162,7 @@ export default function RequestDetail() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`px-5 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+                activeTab === tab.id ? 'border-golplus-blue-600 text-golplus-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               {tab.label}
@@ -255,7 +255,7 @@ export default function RequestDetail() {
                             <p className="text-xs text-gray-500">{(att.fileSize / 1024).toFixed(1)} KB · {format(new Date(att.createdAt), 'dd/MM/yyyy')}</p>
                           </div>
                         </div>
-                        <a href={`/uploads/${att.fileName}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-sm">Baixar</a>
+                        <a href={`/uploads/${att.fileName}`} target="_blank" rel="noopener noreferrer" className="text-golplus-blue-600 hover:text-golplus-blue-800 text-sm">Baixar</a>
                       </li>
                     ))}
                   </ul>
@@ -268,7 +268,7 @@ export default function RequestDetail() {
             <div className="space-y-3">
               {request.auditLogs?.map((log) => (
                 <div key={log.id} className="flex gap-4">
-                  <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-blue-400"></div>
+                  <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-golplus-blue-400"></div>
                   <div>
                     <p className="text-sm text-gray-900"><span className="font-medium">{log.userName}</span> · {log.action}</p>
                     {log.details && <p className="text-xs text-gray-500 mt-0.5">{log.details}</p>}

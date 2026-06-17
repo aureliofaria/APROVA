@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { User, Department, FlowTemplate, Request, RequestTask, Attachment, AuditLog } from '../types';
+import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog } from '../types';
 
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
@@ -50,6 +50,25 @@ export const departmentsApi = {
   create: (name: string) => api.post<Department>('/departments', { name }).then((r) => r.data),
   update: (id: string, name: string) => api.put<Department>(`/departments/${id}`, { name }).then((r) => r.data),
   delete: (id: string) => api.delete(`/departments/${id}`).then((r) => r.data),
+};
+
+// Sectors
+export const sectorsApi = {
+  getAll: () => api.get<Sector[]>('/sectors').then((r) => r.data),
+  getById: (id: string) => api.get<Sector>(`/sectors/${id}`).then((r) => r.data),
+  create: (data: { name: string; description?: string }) =>
+    api.post<Sector>('/sectors', data).then((r) => r.data),
+  update: (id: string, data: { name?: string; description?: string; isActive?: boolean }) =>
+    api.put<Sector>(`/sectors/${id}`, data).then((r) => r.data),
+  delete: (id: string) => api.delete(`/sectors/${id}`).then((r) => r.data),
+  addMember: (sectorId: string, userId: string, role: 'LIDER' | 'PROTETOR') =>
+    api.post<SectorMember>(`/sectors/${sectorId}/members`, { userId, role }).then((r) => r.data),
+  removeMember: (sectorId: string, memberId: string) =>
+    api.delete(`/sectors/${sectorId}/members/${memberId}`).then((r) => r.data),
+  updateMember: (sectorId: string, memberId: string, role: 'LIDER' | 'PROTETOR') =>
+    api.put<SectorMember>(`/sectors/${sectorId}/members/${memberId}`, { role }).then((r) => r.data),
+  availableUsers: (sectorId: string) =>
+    api.get<User[]>(`/sectors/${sectorId}/available-users`).then((r) => r.data),
 };
 
 // Flows

@@ -5,6 +5,28 @@ export interface Department {
   _count?: { users: number };
 }
 
+export interface SectorMember {
+  id: string;
+  sectorId: string;
+  userId: string;
+  user: Pick<User, 'id' | 'name' | 'email' | 'role'>;
+  role: 'LIDER' | 'PROTETOR';
+  createdAt: string;
+}
+
+export interface Sector {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  members: SectorMember[];
+  users?: Pick<User, 'id' | 'name' | 'email' | 'role'>[];
+  flowTemplates?: Pick<FlowTemplate, 'id' | 'name' | 'type' | 'scope' | 'isActive'>[];
+  _count?: { members: number; users: number; flowTemplates: number };
+}
+
 export interface User {
   id: string;
   name: string;
@@ -37,6 +59,8 @@ export interface FlowStep {
   requiredRole?: string;
   requiresAttachment: boolean;
   deadlineHours?: number;
+  handlingSectorId?: string;
+  handlingSector?: { id: string; name: string };
   authLevels: AuthorizationLevel[];
   createdAt: string;
 }
@@ -46,6 +70,9 @@ export interface FlowTemplate {
   name: string;
   description?: string;
   type: 'ONBOARDING' | 'OFFBOARDING' | 'PAYMENT' | 'PURCHASE';
+  scope: 'INTRA' | 'INTER';
+  sectorId?: string;
+  sector?: { id: string; name: string };
   isActive: boolean;
   steps: FlowStep[];
   createdAt: string;
