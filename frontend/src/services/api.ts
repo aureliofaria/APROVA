@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog } from '../types';
+import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem } from '../types';
 
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
@@ -135,6 +135,17 @@ export const tasksApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data);
   },
+};
+
+// Resources
+export const resourcesApi = {
+  getAll: () => api.get<ResourceItem[]>('/resources').then(r => r.data),
+  getActive: () => api.get<ResourceItem[]>('/resources/active').then(r => r.data),
+  create: (data: { name: string; type: string; sectorId?: string; sortOrder?: number }) =>
+    api.post<ResourceItem>('/resources', data).then(r => r.data),
+  update: (id: string, data: Partial<ResourceItem>) =>
+    api.put<ResourceItem>(`/resources/${id}`, data).then(r => r.data),
+  delete: (id: string) => api.delete(`/resources/${id}`).then(r => r.data),
 };
 
 export default api;

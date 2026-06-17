@@ -9,6 +9,7 @@ import sectorsRouter from './routes/sectors';
 import flowsRouter from './routes/flows';
 import requestsRouter from './routes/requests';
 import tasksRouter from './routes/tasks';
+import resourcesRouter from './routes/resources';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use('/api/sectors', sectorsRouter);
 app.use('/api/flows', flowsRouter);
 app.use('/api/requests', requestsRouter);
 app.use('/api/tasks', tasksRouter);
+app.use('/api/resources', resourcesRouter);
 
 app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
 export default app;

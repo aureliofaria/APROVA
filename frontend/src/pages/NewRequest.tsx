@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { flowsApi, requestsApi } from '../services/api';
+import { flowsApi, requestsApi, resourcesApi } from '../services/api';
 import { FlowTypeBadge } from '../components/StatusBadge';
 import FileUpload from '../components/FileUpload';
 import Header from '../components/Header';
@@ -33,8 +33,24 @@ export default function NewRequest() {
     justification: '',
   });
 
+  const [vacancyType, setVacancyType] = useState('');
+  const [replacementName, setReplacementName] = useState('');
+  const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
+
   const { data: flows = [] } = useQuery({ queryKey: ['flows'], queryFn: () => flowsApi.getAll() });
   const filteredFlows = flows.filter((f) => f.type === selectedType && f.isActive);
+  const { data: activeResources = [] } = useQuery({ queryKey: ['resources-active'], queryFn: resourcesApi.getActive, enabled: selectedType === 'ONBOARDING' });
+
+  const resourcesBySector = activeResources.reduce<Record<string, typeof activeResources>>((acc, r) => {
+    const key = r.sector?.name || 'Geral';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(r);
+    return acc;
+  }, {});
+
+  const toggleResource = (id: string) => {
+    setSelectedResourceIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -47,6 +63,11 @@ export default function NewRequest() {
         data.targetEmployee = form.targetEmployee;
         data.targetDepartment = form.targetDepartment;
         data.startDate = form.startDate;
+      }
+      if (selectedType === 'ONBOARDING') {
+        data.vacancyType = vacancyType || undefined;
+        data.replacementName = vacancyType === 'REPLACEMENT' ? replacementName : undefined;
+        data.resourceIds = selectedResourceIds.length > 0 ? selectedResourceIds : undefined;
       }
       if (['PAYMENT', 'PURCHASE'].includes(selectedType)) {
         data.amount = form.amount ? parseFloat(form.amount.replace(/[^0-9.]/g, '')) : undefined;
@@ -184,6 +205,52 @@ export default function NewRequest() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Data de Início</label>
                     <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" />
                   </div>
+                </>
+              )}
+              {selectedType === 'ONBOARDING' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Vaga</label>
+                    <select value={vacancyType} onChange={(e) => setVacancyType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
+                      <option value="">— Selecionar —</option>
+                      <option value="NEW">Nova vaga</option>
+                      <option value="REPLACEMENT">Substituição</option>
+                      <option value="REALLOCATION">Realocação de setor</option>
+                      <option value="PROMOTION">Promoção</option>
+                    </select>
+                  </div>
+                  {vacancyType === 'REPLACEMENT' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Nome do colaborador a ser substituído</label>
+                      <input type="text" value={replacementName} onChange={(e) => setReplacementName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome completo" />
+                    </div>
+                  )}
+                  {vacancyType && activeResources.length > 0 && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Recursos e Sistemas Necessários</label>
+                      <div className="space-y-3">
+                        {Object.entries(resourcesBySector).map(([sectorName, resources]) => (
+                          <div key={sectorName} className="border border-gray-200 rounded-lg p-3">
+                            <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">{sectorName}</div>
+                            <div className="space-y-1.5">
+                              {resources.map((r) => (
+                                <label key={r.id} className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedResourceIds.includes(r.id)}
+                                    onChange={() => toggleResource(r.id)}
+                                    className="rounded border-gray-300 text-golplus-blue-600"
+                                  />
+                                  <span className="text-sm text-gray-700">{r.name}</span>
+                                  <span className="text-xs text-gray-400">{r.type === 'EQUIPMENT' ? 'Equipamento' : r.type === 'SYSTEM_ACCESS' ? 'Acesso a sistema' : 'Outro'}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
               {isFinancial && (

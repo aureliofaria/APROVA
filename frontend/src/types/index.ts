@@ -50,6 +50,29 @@ export interface AuthorizationLevel {
   deadlineHours?: number;
 }
 
+export interface ResourceItem {
+  id: string;
+  name: string;
+  type: 'EQUIPMENT' | 'SYSTEM_ACCESS' | 'OTHER';
+  sectorId?: string;
+  sector?: { id: string; name: string };
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  requestResources?: RequestResource[];
+}
+
+export interface RequestResource {
+  id: string;
+  requestId: string;
+  resourceItemId: string;
+  resourceItem: ResourceItem & { sector?: { id: string; name: string } };
+  quantity: number;
+  notes?: string;
+  status: 'PENDING' | 'ALLOCATED' | 'RETURNED';
+  createdAt: string;
+}
+
 export interface FlowStep {
   id: string;
   flowTemplateId: string;
@@ -63,6 +86,10 @@ export interface FlowStep {
   handlingSectorId?: string;
   handlingSector?: { id: string; name: string };
   authLevels: AuthorizationLevel[];
+  conditions?: string;
+  activateOnSectorId?: string;
+  activateOnSector?: { id: string; name: string };
+  collectsResources?: boolean;
   createdAt: string;
 }
 
@@ -165,6 +192,9 @@ export interface Request {
   targetEmployee?: string;
   targetDepartment?: string;
   startDate?: string;
+  vacancyType?: string;
+  replacementName?: string;
+  resources?: RequestResource[];
   // Financial
   amount?: number;
   currency: string;

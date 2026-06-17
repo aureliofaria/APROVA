@@ -46,7 +46,10 @@ export default function FlowEditor() {
       setScope((existingFlow.scope as 'INTRA' | 'INTER') || 'INTRA');
       setSectorId(existingFlow.sectorId || '');
       setIsActive(existingFlow.isActive);
-      setSteps(existingFlow.steps || []);
+      setSteps((existingFlow.steps || []).map((s) => ({
+        ...s,
+        conditions: typeof s.conditions === 'string' ? JSON.parse(s.conditions || '[]') : (s.conditions || []),
+      })));
     }
   }, [existingFlow]);
 
@@ -63,6 +66,9 @@ export default function FlowEditor() {
       handlingSectorId: '',
       order: steps.length,
       authLevels: [],
+      collectsResources: false,
+      activateOnSectorId: '',
+      conditions: [],
     }]);
   };
 
@@ -101,6 +107,27 @@ export default function FlowEditor() {
     setSteps(newSteps);
   };
 
+  const addCondition = (stepIdx: number) => {
+    const newSteps = [...steps];
+    newSteps[stepIdx].conditions = [
+      ...(newSteps[stepIdx].conditions || []),
+      { field: 'always', op: 'ALWAYS', value: '', targetOrder: 0 },
+    ];
+    setSteps(newSteps);
+  };
+
+  const updateCondition = (stepIdx: number, condIdx: number, field: string, value: any) => {
+    const newSteps = [...steps];
+    newSteps[stepIdx].conditions[condIdx] = { ...newSteps[stepIdx].conditions[condIdx], [field]: value };
+    setSteps(newSteps);
+  };
+
+  const removeCondition = (stepIdx: number, condIdx: number) => {
+    const newSteps = [...steps];
+    newSteps[stepIdx].conditions = newSteps[stepIdx].conditions.filter((_: any, i: number) => i !== condIdx);
+    setSteps(newSteps);
+  };
+
   const handleSave = async () => {
     if (!name) { toast.error('Nome é obrigatório'); return; }
     setSaving(true);
@@ -125,6 +152,9 @@ export default function FlowEditor() {
           slaExpiry: step.slaExpiry || 'KEEP_WITH_RESPONSIBLE',
           handlingSectorId: step.handlingSectorId || null,
           order: i,
+          collectsResources: step.collectsResources ?? false,
+          activateOnSectorId: step.activateOnSectorId || null,
+          conditions: step.conditions?.length ? JSON.stringify(step.conditions) : null,
         };
 
         let stepId = step.id;
@@ -287,6 +317,64 @@ export default function FlowEditor() {
               <div className="flex items-center gap-2 pt-5">
                 <input type="checkbox" id={`att-${idx}`} checked={step.requiresAttachment} onChange={(e) => updateStep(idx, 'requiresAttachment', e.target.checked)} className="rounded border-gray-300 text-golplus-blue-600" />
                 <label htmlFor={`att-${idx}`} className="text-sm text-gray-700">Requer anexo</label>
+              </div>
+              <div className="flex items-center gap-2 pt-5">
+                <input type="checkbox" id={`cr-${idx}`} checked={step.collectsResources || false} onChange={(e) => updateStep(idx, 'collectsResources', e.target.checked)} className="rounded border-gray-300 text-golplus-blue-600" />
+                <label htmlFor={`cr-${idx}`} className="text-sm text-gray-700">Esta etapa coleta recursos/sistemas</label>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Ativar somente se houver recursos do setor</label>
+                <select value={step.activateOnSectorId || ''} onChange={(e) => updateStep(idx, 'activateOnSectorId', e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500">
+                  <option value="">— Sempre ativar —</option>
+                  {sectors.filter((s) => s.isActive).map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Routing conditions */}
+            <div className="border-t border-gray-100 pt-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-gray-600">Regras de roteamento após esta etapa</span>
+                <button onClick={() => addCondition(idx)} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 font-medium">+ Adicionar Regra</button>
+              </div>
+              <div className="space-y-2">
+                {(step.conditions || []).map((cond: any, condIdx: number) => (
+                  <div key={condIdx} className="bg-gray-50 rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-2 relative">
+                    <button onClick={() => removeCondition(idx, condIdx)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-xs">×</button>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Campo</label>
+                      <select value={cond.field} onChange={(e) => updateCondition(idx, condIdx, 'field', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
+                        <option value="always">Sempre</option>
+                        <option value="vacancyType">Tipo de vaga (vacancyType)</option>
+                        <option value="amount">Valor (amount)</option>
+                      </select>
+                    </div>
+                    {cond.field !== 'always' && (
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Operador</label>
+                        <select value={cond.op} onChange={(e) => updateCondition(idx, condIdx, 'op', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
+                          <option value="EQUALS">Igual a</option>
+                          <option value="GT">Maior que</option>
+                          <option value="LT">Menor que</option>
+                          <option value="GTE">Maior ou igual</option>
+                          <option value="LTE">Menor ou igual</option>
+                        </select>
+                      </div>
+                    )}
+                    {cond.field !== 'always' && (
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Valor</label>
+                        <input type="text" value={cond.value || ''} onChange={(e) => updateCondition(idx, condIdx, 'value', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="Ex: REPLACEMENT" />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Ir para etapa de ordem</label>
+                      <input type="number" min="0" value={cond.targetOrder ?? 0} onChange={(e) => updateCondition(idx, condIdx, 'targetOrder', parseInt(e.target.value) || 0)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

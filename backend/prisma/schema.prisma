@@ -42,11 +42,13 @@ model Sector {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members       SectorMember[]
-  users         User[]         @relation("SectorMembers")
-  flowTemplates FlowTemplate[] @relation("FlowSector")
-  flowSteps     FlowStep[]     @relation("StepSector")
-  requests      Request[]      @relation("RequestSector")
+  members         SectorMember[]
+  users           User[]         @relation("SectorMembers")
+  flowTemplates   FlowTemplate[] @relation("FlowSector")
+  flowSteps       FlowStep[]     @relation("StepSector")
+  activatedSteps  FlowStep[]     @relation("StepActivationSector")
+  requests        Request[]      @relation("RequestSector")
+  resourceItems   ResourceItem[] @relation("SectorResources")
 }
 
 model SectorMember {
@@ -89,6 +91,10 @@ model FlowStep {
   handlingSectorId   String?
   handlingSector     Sector?              @relation("StepSector", fields: [handlingSectorId], references: [id])
   slaExpiry          String               @default("KEEP_WITH_RESPONSIBLE")
+  conditions         String?
+  activateOnSectorId String?
+  activateOnSector   Sector?              @relation("StepActivationSector", fields: [activateOnSectorId], references: [id])
+  collectsResources  Boolean              @default(false)
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   createdAt          DateTime             @default(now())
@@ -126,7 +132,10 @@ model Request {
   supplier         String?
   costCenter       String?
   justification    String?
+  vacancyType      String?
+  replacementName  String?
   tasks            RequestTask[]
+  resources        RequestResource[]
   attachments      Attachment[]
   approvals        Approval[]
   auditLogs        AuditLog[]
@@ -190,4 +199,31 @@ model AuditLog {
   action    String
   details   String?
   createdAt DateTime @default(now())
+}
+
+model ResourceItem {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   @default("EQUIPMENT") // EQUIPMENT | SYSTEM_ACCESS | OTHER
+  sectorId  String?
+  sector    Sector?  @relation("SectorResources", fields: [sectorId], references: [id])
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  requestResources RequestResource[]
+}
+
+model RequestResource {
+  id             String       @id @default(cuid())
+  requestId      String
+  request        Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  resourceItemId String
+  resourceItem   ResourceItem @relation(fields: [resourceItemId], references: [id])
+  quantity       Int          @default(1)
+  notes          String?
+  status         String       @default("PENDING") // PENDING | ALLOCATED | RETURNED
+  createdAt      DateTime     @default(now())
+
+  @@unique([requestId, resourceItemId])
 }

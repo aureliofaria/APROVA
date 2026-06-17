@@ -9,6 +9,7 @@ const navItems = [
   { path: '/requests', label: 'Solicitações', icon: '📋', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/requests/new', label: 'Nova Solicitação', icon: '➕', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/sectors', label: 'Setores', icon: '🏢', roles: ['ADMIN'] },
+  { path: '/resources', label: 'Recursos', icon: '🗂️', roles: ['ADMIN'] },
   { path: '/flows', label: 'Fluxos', icon: '⚙️', roles: ['ADMIN'] },
   { path: '/users', label: 'Usuários', icon: '👥', roles: ['ADMIN'] },
 ];

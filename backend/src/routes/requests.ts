@@ -49,6 +49,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         attachments: { orderBy: { createdAt: 'desc' } },
         approvals: { include: { approver: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'desc' } },
         auditLogs: { orderBy: { createdAt: 'asc' } },
+        resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } } } },
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
@@ -60,7 +61,9 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 
 router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { flowId, title, description, targetEmployee, targetDepartment, startDate, amount, supplier, costCenter, justification } = req.body;
+    const { flowId, title, description, targetEmployee, targetDepartment, startDate,
+            amount, supplier, costCenter, justification, vacancyType, replacementName,
+            resourceIds } = req.body;
     if (!flowId || !title) { res.status(400).json({ error: 'Fluxo e título são obrigatórios' }); return; }
 
     const flow = await prisma.flowTemplate.findUnique({ where: { id: flowId } });
@@ -81,8 +84,21 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         supplier,
         costCenter,
         justification,
+        vacancyType: vacancyType || null,
+        replacementName: replacementName || null,
       },
     });
+
+    // Save selected resources
+    if (Array.isArray(resourceIds) && resourceIds.length > 0) {
+      for (const rid of resourceIds as string[]) {
+        await prisma.requestResource.upsert({
+          where: { requestId_resourceItemId: { requestId: request.id, resourceItemId: rid } },
+          update: {},
+          create: { requestId: request.id, resourceItemId: rid },
+        });
+      }
+    }
 
     await prisma.auditLog.create({
       data: {
@@ -98,7 +114,12 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 
     const full = await prisma.request.findUnique({
       where: { id: request.id },
-      include: { flow: true, initiator: { select: { id: true, name: true, email: true } }, tasks: true },
+      include: {
+        flow: true,
+        initiator: { select: { id: true, name: true, email: true } },
+        tasks: true,
+        resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } } } },
+      },
     });
     res.status(201).json(full);
   } catch (err) {

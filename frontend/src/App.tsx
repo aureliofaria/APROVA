@@ -13,6 +13,7 @@ import FlowTemplates from './pages/FlowTemplates';
 import FlowEditor from './pages/FlowEditor';
 import Setores from './pages/Setores';
 import Users from './pages/Users';
+import ResourceManagement from './pages/ResourceManagement';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="/flows/new" element={<ProtectedRoute adminOnly><FlowEditor /></ProtectedRoute>} />
         <Route path="/flows/:id/edit" element={<ProtectedRoute adminOnly><FlowEditor /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute adminOnly><Users /></ProtectedRoute>} />
+        <Route path="/resources" element={<ProtectedRoute adminOnly><ResourceManagement /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

@@ -1,49 +1,90 @@
 import prisma from '../lib/prisma';
 
+interface BranchCondition {
+  field: 'vacancyType' | 'amount' | 'always';
+  op: 'EQUALS' | 'GT' | 'LT' | 'GTE' | 'LTE' | 'ALWAYS';
+  value: string | null;
+  targetOrder: number;
+}
+
+function parseConditions(json: string | null | undefined): BranchCondition[] {
+  if (!json) return [];
+  try { return JSON.parse(json); } catch { return []; }
+}
+
+function evaluateNextOrder(
+  steps: Array<{ order: number; conditions: string | null }>,
+  request: { vacancyType?: string | null; amount?: number | null }
+): number | null {
+  const conditions: BranchCondition[] = steps.flatMap(s => parseConditions(s.conditions));
+  for (const cond of conditions) {
+    if (cond.field === 'always' || cond.op === 'ALWAYS') return cond.targetOrder;
+    if (cond.field === 'vacancyType' && cond.op === 'EQUALS' && request.vacancyType === cond.value) return cond.targetOrder;
+    if (cond.field === 'amount' && request.amount != null) {
+      const n = request.amount;
+      const v = parseFloat(cond.value ?? '0');
+      if (cond.op === 'GT' && n > v) return cond.targetOrder;
+      if (cond.op === 'LT' && n < v) return cond.targetOrder;
+      if (cond.op === 'GTE' && n >= v) return cond.targetOrder;
+      if (cond.op === 'LTE' && n <= v) return cond.targetOrder;
+      if (cond.op === 'EQUALS' && n === v) return cond.targetOrder;
+    }
+  }
+  return null;
+}
+
 export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0) {
-  const flow = await prisma.flowTemplate.findUnique({
-    where: { id: flowId },
-    include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } },
-  });
-  if (!flow) throw new Error('Fluxo não encontrado');
+  const [flow, resources, request] = await Promise.all([
+    prisma.flowTemplate.findUnique({
+      where: { id: flowId },
+      include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } },
+    }),
+    prisma.requestResource.findMany({ where: { requestId }, include: { resourceItem: true } }),
+    prisma.request.findUnique({ where: { id: requestId } }),
+  ]);
 
-  const step = flow.steps.find((s) => s.order === stepOrder);
-  if (!step) return;
+  if (!flow || !request) throw new Error('Fluxo ou solicitação não encontrado');
 
-  const request = await prisma.request.findUnique({ where: { id: requestId } });
-  if (!request) throw new Error('Solicitação não encontrada');
+  const steps = flow.steps.filter(s => s.order === stepOrder);
+  if (steps.length === 0) return;
 
-  // Find users with the required role for this step
-  let assignees: { id: string; name: string }[] = [];
-  if (step.requiredRole) {
-    assignees = await prisma.user.findMany({
-      where: { role: step.requiredRole, isActive: true },
-      select: { id: true, name: true },
-    });
-  }
+  let tasksCreated = 0;
 
-  // Fallback: assign to the initiator if no role-based assignees
-  if (assignees.length === 0) {
-    const initiator = await prisma.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
-    if (initiator) assignees = [initiator];
-  }
+  for (const step of steps) {
+    // Activation condition: skip if request lacks resources from required sector
+    if (step.activateOnSectorId) {
+      const hasResource = resources.some(r => r.resourceItem.sectorId === step.activateOnSectorId);
+      if (!hasResource) continue;
+    }
 
-  const dueDate = step.deadlineHours
-    ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000)
-    : null;
+    let assignees: { id: string; name: string }[] = [];
+    if (step.requiredRole) {
+      assignees = await prisma.user.findMany({
+        where: { role: step.requiredRole, isActive: true },
+        select: { id: true, name: true },
+      });
+    }
+    if (assignees.length === 0) {
+      const initiator = await prisma.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
+      if (initiator) assignees = [initiator];
+    }
 
-  for (const assignee of assignees) {
-    await prisma.requestTask.create({
-      data: {
-        requestId,
-        stepId: step.id,
-        assigneeId: assignee.id,
-        title: step.name,
-        description: step.description,
-        status: 'PENDING',
-        dueDate,
-      },
-    });
+    const dueDate = step.deadlineHours ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000) : null;
+
+    for (const assignee of assignees) {
+      await prisma.requestTask.create({
+        data: {
+          requestId,
+          stepId: step.id,
+          assigneeId: assignee.id,
+          title: step.name,
+          description: step.description,
+          status: 'PENDING',
+          dueDate,
+        },
+      });
+      tasksCreated++;
+    }
   }
 
   await prisma.auditLog.create({
@@ -52,72 +93,9 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       userId: request.initiatorId,
       userName: 'Sistema',
       action: 'STEP_STARTED',
-      details: `Etapa iniciada: ${step.name}`,
+      details: `Etapa ${stepOrder} iniciada (${tasksCreated} tarefa(s) criada(s))`,
     },
   });
-}
-
-export async function advanceRequest(requestId: string) {
-  const request = await prisma.request.findUnique({
-    where: { id: requestId },
-    include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
-  });
-  if (!request) throw new Error('Solicitação não encontrada');
-
-  const complete = await isStepComplete(requestId, request.currentStep);
-  if (!complete) return;
-
-  const nextStepOrder = request.currentStep + 1;
-  const nextStep = request.flow.steps.find((s) => s.order === nextStepOrder);
-
-  if (nextStep) {
-    await prisma.request.update({
-      where: { id: requestId },
-      data: { currentStep: nextStepOrder, status: 'IN_PROGRESS' },
-    });
-    await createRequestTasks(requestId, request.flowId, nextStepOrder);
-  } else {
-    await prisma.request.update({
-      where: { id: requestId },
-      data: { status: 'COMPLETED' },
-    });
-    await prisma.auditLog.create({
-      data: {
-        requestId,
-        userId: request.initiatorId,
-        userName: 'Sistema',
-        action: 'COMPLETED',
-        details: 'Solicitação concluída com sucesso',
-      },
-    });
-  }
-}
-
-export async function checkAuthorizationLevel(requestId: string) {
-  const request = await prisma.request.findUnique({
-    where: { id: requestId },
-    include: {
-      flow: {
-        include: {
-          steps: { orderBy: { order: 'asc' }, include: { authLevels: true } },
-        },
-      },
-    },
-  });
-  if (!request) return null;
-
-  const currentStep = request.flow.steps.find((s) => s.order === request.currentStep);
-  if (!currentStep || currentStep.authLevels.length === 0) return null;
-
-  const amount = request.amount || 0;
-  for (const level of currentStep.authLevels) {
-    const min = level.minValue ?? 0;
-    const max = level.maxValue ?? Infinity;
-    if (amount >= min && amount <= max) {
-      return level;
-    }
-  }
-  return currentStep.authLevels[currentStep.authLevels.length - 1];
 }
 
 export async function processSlaExpiries(): Promise<number> {
@@ -133,10 +111,7 @@ export async function processSlaExpiries(): Promise<number> {
         include: {
           handlingSector: {
             include: {
-              members: {
-                where: { role: 'LIDER' },
-                include: { user: { select: { id: true, name: true } } },
-              },
+              members: { where: { role: 'LIDER' }, include: { user: { select: { id: true, name: true } } } },
             },
           },
         },
@@ -157,9 +132,7 @@ export async function processSlaExpiries(): Promise<number> {
       await prisma.request.update({ where: { id: task.requestId }, data: { status: 'RETURNED' } });
       await prisma.auditLog.create({
         data: {
-          requestId: task.requestId,
-          userId: 'system',
-          userName: 'Sistema',
+          requestId: task.requestId, userId: 'system', userName: 'Sistema',
           action: 'SLA_RETURNED',
           details: `SLA expirado. Tarefa "${task.title}" devolvida ao solicitante ${task.request.initiator.name}`,
         },
@@ -172,9 +145,7 @@ export async function processSlaExpiries(): Promise<number> {
       });
       await prisma.auditLog.create({
         data: {
-          requestId: task.requestId,
-          userId: 'system',
-          userName: 'Sistema',
+          requestId: task.requestId, userId: 'system', userName: 'Sistema',
           action: 'SLA_ESCALATED',
           details: leader
             ? `SLA expirado. Tarefa "${task.title}" transferida ao líder ${leader.user.name}`
@@ -182,15 +153,12 @@ export async function processSlaExpiries(): Promise<number> {
         },
       });
     } else {
-      // KEEP_WITH_RESPONSIBLE — just flag it
       await prisma.requestTask.update({ where: { id: task.id }, data: { slaEscalated: true } });
       await prisma.auditLog.create({
         data: {
-          requestId: task.requestId,
-          userId: 'system',
-          userName: 'Sistema',
+          requestId: task.requestId, userId: 'system', userName: 'Sistema',
           action: 'SLA_EXPIRED',
-          details: `SLA expirado. Tarefa "${task.title}" mantida com responsável ${task.assignee.name}`,
+          details: `SLA expirado. Tarefa "${task.title}" mantida com ${task.assignee.name}`,
         },
       });
     }
@@ -199,43 +167,104 @@ export async function processSlaExpiries(): Promise<number> {
   return expiredTasks.length;
 }
 
-export async function isStepComplete(requestId: string, stepOrder: number): Promise<boolean> {
+export async function advanceRequest(requestId: string) {
   const request = await prisma.request.findUnique({
     where: { id: requestId },
-    include: {
-      flow: {
-        include: {
-          steps: { where: { order: stepOrder }, include: { authLevels: true } },
-        },
-      },
-      tasks: { where: { step: { order: stepOrder } } },
-      approvals: { where: { stepOrder } },
-    },
+    include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
   });
+  if (!request) throw new Error('Solicitação não encontrada');
+
+  const complete = await isStepComplete(requestId, request.currentStep);
+  if (!complete) return;
+
+  // Determine next order via branching conditions or sequential default
+  const currentSteps = request.flow.steps.filter(s => s.order === request.currentStep);
+  const conditionNextOrder = evaluateNextOrder(currentSteps, request);
+
+  let nextStepOrder: number | null = conditionNextOrder;
+  if (nextStepOrder === null) {
+    const allOrders = [...new Set(request.flow.steps.map(s => s.order))].sort((a, b) => a - b);
+    const currentIdx = allOrders.indexOf(request.currentStep);
+    nextStepOrder = currentIdx < allOrders.length - 1 ? allOrders[currentIdx + 1] : null;
+  }
+
+  const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
+
+  if (hasNextStep) {
+    await prisma.request.update({
+      where: { id: requestId },
+      data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS' },
+    });
+    await createRequestTasks(requestId, request.flowId, nextStepOrder!);
+  } else {
+    await prisma.request.update({ where: { id: requestId }, data: { status: 'COMPLETED' } });
+    await prisma.auditLog.create({
+      data: {
+        requestId,
+        userId: request.initiatorId,
+        userName: 'Sistema',
+        action: 'COMPLETED',
+        details: 'Solicitação concluída com sucesso',
+      },
+    });
+  }
+}
+
+export async function isStepComplete(requestId: string, stepOrder: number): Promise<boolean> {
+  const [request, resources] = await Promise.all([
+    prisma.request.findUnique({
+      where: { id: requestId },
+      include: {
+        flow: { include: { steps: { where: { order: stepOrder }, include: { authLevels: true } } } },
+        tasks: { where: { step: { order: stepOrder } } },
+        approvals: { where: { stepOrder } },
+      },
+    }),
+    prisma.requestResource.findMany({ where: { requestId }, include: { resourceItem: true } }),
+  ]);
+
   if (!request) return false;
 
-  const step = request.flow.steps[0];
-  if (!step) return false;
-
-  // All tasks must be completed
-  const allTasksDone = request.tasks.every((t) => t.status === 'COMPLETED');
-  if (!allTasksDone) return false;
-
-  // Check auth levels if any
-  if (step.authLevels.length > 0) {
-    const amount = request.amount || 0;
-    let requiredApprovers = 1;
-    for (const level of step.authLevels) {
-      const min = level.minValue ?? 0;
-      const max = level.maxValue ?? Infinity;
-      if (amount >= min && amount <= max) {
-        requiredApprovers = level.requiredApprovers;
-        break;
-      }
+  for (const step of request.flow.steps) {
+    // Step was conditionally skipped — count as complete
+    if (step.activateOnSectorId) {
+      const hasResource = resources.some(r => r.resourceItem.sectorId === step.activateOnSectorId);
+      if (!hasResource) continue;
     }
-    const approvedCount = request.approvals.filter((a) => a.decision === 'APPROVED').length;
-    if (approvedCount < requiredApprovers) return false;
+
+    const stepTasks = request.tasks.filter(t => t.stepId === step.id);
+    if (stepTasks.length === 0) return false;
+    if (!stepTasks.every(t => t.status === 'COMPLETED')) return false;
+
+    if (step.authLevels.length > 0) {
+      const amount = request.amount ?? 0;
+      let required = 1;
+      for (const lvl of step.authLevels) {
+        const min = lvl.minValue ?? 0;
+        const max = lvl.maxValue ?? Infinity;
+        if (amount >= min && amount <= max) { required = lvl.requiredApprovers; break; }
+      }
+      const approved = request.approvals.filter(a => a.decision === 'APPROVED').length;
+      if (approved < required) return false;
+    }
   }
 
   return true;
+}
+
+export async function checkAuthorizationLevel(requestId: string) {
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
+  });
+  if (!request) return null;
+  const currentStep = request.flow.steps.find(s => s.order === request.currentStep);
+  if (!currentStep || currentStep.authLevels.length === 0) return null;
+  const amount = request.amount ?? 0;
+  for (const level of currentStep.authLevels) {
+    const min = level.minValue ?? 0;
+    const max = level.maxValue ?? Infinity;
+    if (amount >= min && amount <= max) return level;
+  }
+  return currentStep.authLevels[currentStep.authLevels.length - 1];
 }
