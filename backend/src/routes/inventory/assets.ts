@@ -4,44 +4,70 @@ import { authenticate, requireRole, AuthRequest } from '../../middleware/auth';
 
 const router = Router();
 
+// Tipos de movimentação e como cada um altera o estado do ativo
+const VALID_MOVEMENT_TYPES = [
+  'ENTRADA', 'ALOCACAO', 'DEVOLUCAO', 'MANUTENCAO', 'RETORNO_MANUTENCAO',
+  'DESCARTE', 'TRANSFERENCIA', 'EMPRESTIMO', 'AJUSTE_STATUS',
+];
+
+// GET /api/inventory/assets — lista com filtros
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { category, warehouseId, itemId, isActive } = req.query;
-    const where: any = {};
+    const { type, category, status, departmentId, userId, warehouseId, search, isActive } = req.query;
+    const where: any = { isActive: isActive === 'false' ? false : true };
+    if (status) where.status = status as string;
+    if (departmentId) where.departmentId = departmentId as string;
+    if (userId) where.userId = userId as string;
     if (warehouseId) where.warehouseId = warehouseId as string;
-    if (itemId) where.itemId = itemId as string;
-    if (isActive === 'false') {
-      where.item = { isActive: false };
-    } else {
-      where.item = { isActive: true };
+    if (type || category) {
+      where.item = {};
+      if (type) where.item.type = type as string;
+      if (category) where.item.category = category as string;
     }
-    if (category) {
-      where.item = { ...where.item, category: category as string };
+    if (search) {
+      const s = search as string;
+      where.OR = [
+        { tag: { contains: s } },
+        { serialNumber: { contains: s } },
+        { imei: { contains: s } },
+        { phoneNumber: { contains: s } },
+        { item: { name: { contains: s } } },
+        { item: { code: { contains: s } } },
+      ];
     }
 
-    const stocks = await prisma.stock.findMany({
+    const assets = await prisma.asset.findMany({
       where,
       include: {
         item: true,
-        warehouse: true,
+        warehouse: { select: { id: true, code: true, name: true } },
+        department: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, email: true } },
       },
       orderBy: { updatedAt: 'desc' },
     });
-    res.json(stocks);
+    res.json(assets);
   } catch {
-    res.status(500).json({ error: 'Erro ao buscar estoques' });
+    res.status(500).json({ error: 'Erro ao buscar ativos' });
   }
 });
 
+// GET /api/inventory/assets/:id — detalhe completo + histórico
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const stock = await prisma.stock.findUnique({
+    const asset = await prisma.asset.findUnique({
       where: { id: req.params.id },
       include: {
         item: true,
         warehouse: true,
+        department: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, email: true } },
         movements: {
           include: {
+            fromDepartment: { select: { id: true, name: true } },
+            toDepartment: { select: { id: true, name: true } },
+            fromUser: { select: { id: true, name: true } },
+            toUser: { select: { id: true, name: true } },
             createdBy: { select: { id: true, name: true } },
             request: { select: { id: true, title: true } },
           },
@@ -49,146 +75,215 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         },
       },
     });
-    if (!stock) { res.status(404).json({ error: 'Estoque não encontrado' }); return; }
-    res.json(stock);
+    if (!asset) { res.status(404).json({ error: 'Ativo não encontrado' }); return; }
+    res.json(asset);
   } catch {
-    res.status(500).json({ error: 'Erro ao buscar estoque' });
+    res.status(500).json({ error: 'Erro ao buscar ativo' });
   }
 });
 
+// POST /api/inventory/assets — cadastra ativo + registra ENTRADA
 router.post('/', authenticate, requireRole('ADMIN', 'GESTOR'), async (req: AuthRequest, res: Response) => {
   try {
-    const { itemId, warehouseId, quantity, minQuantity, maxQuantity } = req.body;
-    if (!itemId || !warehouseId) {
-      res.status(400).json({ error: 'itemId e warehouseId são obrigatórios' });
-      return;
-    }
-    const qty = Number(quantity ?? 0);
+    const {
+      itemId, tag, serialNumber, imei, phoneNumber, status, condition,
+      purchaseDate, supplier, invoiceNumber, invoiceValue,
+      warehouseId, departmentId, userId, notes,
+    } = req.body;
+    if (!itemId) { res.status(400).json({ error: 'itemId é obrigatório' }); return; }
 
-    const stock = await prisma.$transaction(async (tx) => {
-      const created = await tx.stock.create({
+    const initialStatus = status || (userId ? 'ATIVO' : 'DISPONIVEL');
+
+    const result = await prisma.$transaction(async (tx) => {
+      const asset = await tx.asset.create({
         data: {
           itemId,
-          warehouseId,
-          quantity: qty,
-          minQuantity: minQuantity != null ? Number(minQuantity) : null,
-          maxQuantity: maxQuantity != null ? Number(maxQuantity) : null,
+          tag: tag || null,
+          serialNumber: serialNumber || null,
+          imei: imei || null,
+          phoneNumber: phoneNumber || null,
+          status: initialStatus,
+          condition: condition || 'NOVO',
+          purchaseDate: purchaseDate ? new Date(purchaseDate) : null,
+          supplier: supplier || null,
+          invoiceNumber: invoiceNumber || null,
+          invoiceValue: invoiceValue != null ? Number(invoiceValue) : null,
+          warehouseId: warehouseId || null,
+          departmentId: departmentId || null,
+          userId: userId || null,
+          notes: notes || null,
         },
-        include: { item: true, warehouse: true },
+        include: { item: true, warehouse: true, department: true, user: { select: { id: true, name: true } } },
       });
 
-      await tx.inventoryMovement.create({
+      await tx.assetMovement.create({
         data: {
-          itemId,
-          warehouseId,
-          stockId: created.id,
+          assetId: asset.id,
           type: 'ENTRADA',
-          quantity: qty,
-          previousQuantity: 0,
-          currentQuantity: qty,
-          reason: 'Cadastro inicial do estoque',
+          toDepartmentId: departmentId || null,
+          toUserId: userId || null,
+          newStatus: initialStatus,
+          reason: 'Cadastro inicial do ativo',
           createdById: req.user.id,
         },
       });
 
-      return created;
+      return asset;
     });
 
-    res.status(201).json(stock);
+    res.status(201).json(result);
   } catch (e: any) {
-    if (e?.code === 'P2002') { res.status(409).json({ error: 'Estoque já cadastrado para este item/almoxarifado' }); return; }
-    if (e?.code === 'P2025') { res.status(404).json({ error: 'Item ou almoxarifado não encontrado' }); return; }
-    res.status(500).json({ error: 'Erro ao criar estoque' });
+    if (e?.code === 'P2002') { res.status(409).json({ error: 'Patrimônio/tag, série ou IMEI já cadastrado' }); return; }
+    if (e?.code === 'P2025') { res.status(404).json({ error: 'Item, almoxarifado, setor ou usuário não encontrado' }); return; }
+    res.status(500).json({ error: 'Erro ao cadastrar ativo' });
   }
 });
 
+// PUT /api/inventory/assets/:id — atualiza dados descritivos (não muda posse/status)
 router.put('/:id', authenticate, requireRole('ADMIN', 'GESTOR'), async (req: AuthRequest, res: Response) => {
   try {
-    const { minQuantity, maxQuantity } = req.body;
+    const { tag, serialNumber, imei, phoneNumber, condition, purchaseDate, supplier, invoiceNumber, invoiceValue, notes, isActive } = req.body;
     const data: any = {};
-    if (minQuantity !== undefined) data.minQuantity = minQuantity != null ? Number(minQuantity) : null;
-    if (maxQuantity !== undefined) data.maxQuantity = maxQuantity != null ? Number(maxQuantity) : null;
+    if (tag !== undefined) data.tag = tag;
+    if (serialNumber !== undefined) data.serialNumber = serialNumber;
+    if (imei !== undefined) data.imei = imei;
+    if (phoneNumber !== undefined) data.phoneNumber = phoneNumber;
+    if (condition !== undefined) data.condition = condition;
+    if (purchaseDate !== undefined) data.purchaseDate = purchaseDate ? new Date(purchaseDate) : null;
+    if (supplier !== undefined) data.supplier = supplier;
+    if (invoiceNumber !== undefined) data.invoiceNumber = invoiceNumber;
+    if (invoiceValue !== undefined) data.invoiceValue = invoiceValue != null ? Number(invoiceValue) : null;
+    if (notes !== undefined) data.notes = notes;
+    if (isActive !== undefined) data.isActive = isActive;
 
-    const stock = await prisma.stock.update({
+    const asset = await prisma.asset.update({
       where: { id: req.params.id },
       data,
-      include: { item: true, warehouse: true },
+      include: { item: true, warehouse: true, department: true, user: { select: { id: true, name: true } } },
     });
-    res.json(stock);
+    res.json(asset);
   } catch (e: any) {
-    if (e?.code === 'P2025') { res.status(404).json({ error: 'Estoque não encontrado' }); return; }
-    res.status(500).json({ error: 'Erro ao atualizar estoque' });
+    if (e?.code === 'P2002') { res.status(409).json({ error: 'Patrimônio/tag, série ou IMEI já cadastrado' }); return; }
+    if (e?.code === 'P2025') { res.status(404).json({ error: 'Ativo não encontrado' }); return; }
+    res.status(500).json({ error: 'Erro ao atualizar ativo' });
   }
 });
 
-const VALID_MOVEMENT_TYPES = ['ENTRADA', 'SAIDA', 'AJUSTE', 'TRANSFERENCIA'];
-
+// POST /api/inventory/assets/:id/movements — registra movimentação e atualiza estado
 router.post('/:id/movements', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { type, quantity, reason, notes, requestId } = req.body;
-    if (!type) { res.status(400).json({ error: 'Tipo é obrigatório' }); return; }
+    const { type, toDepartmentId, toUserId, warehouseId, newStatus, reason, notes, requestId, movementDate } = req.body;
+    if (!type) { res.status(400).json({ error: 'type é obrigatório' }); return; }
     if (!VALID_MOVEMENT_TYPES.includes(type)) {
-      res.status(400).json({ error: `Tipo inválido. Válidos: ${VALID_MOVEMENT_TYPES.join(', ')}` });
-      return;
-    }
-    const qty = Number(quantity ?? 0);
-    if (qty === 0 && type !== 'AJUSTE') {
-      res.status(400).json({ error: 'Quantidade deve ser informada' });
+      res.status(400).json({ error: `type inválido. Válidos: ${VALID_MOVEMENT_TYPES.join(', ')}` });
       return;
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const stock = await tx.stock.findUnique({ where: { id: req.params.id } });
-      if (!stock) throw Object.assign(new Error('not found'), { code: 'P2025' });
+      const asset = await tx.asset.findUnique({ where: { id: req.params.id } });
+      if (!asset) throw Object.assign(new Error('not found'), { code: 'P2025' });
 
-      let delta = qty;
-      if (type === 'SAIDA') delta = -qty;
+      const fromDepartmentId = asset.departmentId;
+      const fromUserId = asset.userId;
+      const previousStatus = asset.status;
 
-      const newQty = stock.quantity + delta;
+      // Estado-alvo do ativo conforme o tipo de movimentação
+      const update: any = {};
+      let resolvedStatus: string | null = newStatus || null;
 
-      const updated = await tx.stock.update({
-        where: { id: req.params.id },
-        data: { quantity: newQty },
-        include: { item: true, warehouse: true },
+      switch (type) {
+        case 'DEVOLUCAO':
+          update.userId = null;
+          update.status = 'DISPONIVEL';
+          resolvedStatus = 'DISPONIVEL';
+          if (warehouseId !== undefined) update.warehouseId = warehouseId || null;
+          break;
+        case 'DESCARTE':
+          update.status = 'DESCARTADO';
+          update.isActive = false;
+          resolvedStatus = 'DESCARTADO';
+          break;
+        case 'MANUTENCAO':
+          update.status = 'MANUTENCAO';
+          resolvedStatus = 'MANUTENCAO';
+          break;
+        case 'RETORNO_MANUTENCAO':
+          update.status = 'DISPONIVEL';
+          resolvedStatus = 'DISPONIVEL';
+          break;
+        case 'ALOCACAO':
+        case 'EMPRESTIMO':
+          if (toDepartmentId !== undefined) update.departmentId = toDepartmentId || null;
+          if (toUserId !== undefined) update.userId = toUserId || null;
+          update.status = type === 'EMPRESTIMO' ? 'EMPRESTADO' : 'ATIVO';
+          resolvedStatus = update.status;
+          break;
+        case 'TRANSFERENCIA':
+          if (toDepartmentId !== undefined) update.departmentId = toDepartmentId || null;
+          if (toUserId !== undefined) update.userId = toUserId || null;
+          if (warehouseId !== undefined) update.warehouseId = warehouseId || null;
+          if (newStatus) update.status = newStatus;
+          break;
+        default: // AJUSTE_STATUS, ENTRADA
+          if (newStatus) update.status = newStatus;
+          if (toDepartmentId !== undefined) update.departmentId = toDepartmentId || null;
+          if (toUserId !== undefined) update.userId = toUserId || null;
+          if (warehouseId !== undefined) update.warehouseId = warehouseId || null;
+          break;
+      }
+
+      const updatedAsset = await tx.asset.update({
+        where: { id: asset.id },
+        data: update,
+        include: { item: true, warehouse: true, department: true, user: { select: { id: true, name: true } } },
       });
 
-      const movement = await tx.inventoryMovement.create({
+      const movement = await tx.assetMovement.create({
         data: {
-          itemId: stock.itemId,
-          warehouseId: stock.warehouseId,
-          stockId: stock.id,
+          assetId: asset.id,
           type,
-          quantity: qty,
-          previousQuantity: stock.quantity,
-          currentQuantity: newQty,
-          reason: reason ?? null,
-          notes: notes ?? null,
-          requestId: requestId ?? null,
+          movementDate: movementDate ? new Date(movementDate) : new Date(),
+          fromDepartmentId,
+          toDepartmentId: update.departmentId !== undefined ? update.departmentId : (toDepartmentId || null),
+          fromUserId,
+          toUserId: update.userId !== undefined ? update.userId : (toUserId || null),
+          previousStatus,
+          newStatus: resolvedStatus,
+          requestId: requestId || null,
+          reason: reason || null,
+          notes: notes || null,
           createdById: req.user.id,
         },
         include: {
+          fromDepartment: { select: { id: true, name: true } },
+          toDepartment: { select: { id: true, name: true } },
+          fromUser: { select: { id: true, name: true } },
+          toUser: { select: { id: true, name: true } },
           createdBy: { select: { id: true, name: true } },
           request: { select: { id: true, title: true } },
         },
       });
 
-      return { stock: updated, movement };
+      return { asset: updatedAsset, movement };
     });
 
     res.status(201).json(result);
   } catch (e: any) {
-    if (e?.code === 'P2025') { res.status(404).json({ error: 'Estoque não encontrado' }); return; }
+    if (e?.code === 'P2025') { res.status(404).json({ error: 'Ativo não encontrado' }); return; }
     res.status(500).json({ error: 'Erro ao registrar movimentação' });
   }
 });
 
+// GET /api/inventory/assets/:id/movements — histórico do ativo
 router.get('/:id/movements', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const movements = await prisma.inventoryMovement.findMany({
-      where: { stockId: req.params.id },
+    const movements = await prisma.assetMovement.findMany({
+      where: { assetId: req.params.id },
       include: {
-        item: { select: { code: true, name: true, category: true } },
-        warehouse: { select: { code: true, name: true } },
+        fromDepartment: { select: { id: true, name: true } },
+        toDepartment: { select: { id: true, name: true } },
+        fromUser: { select: { id: true, name: true } },
+        toUser: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
         request: { select: { id: true, title: true } },
       },

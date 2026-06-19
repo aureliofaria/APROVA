@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'aprova-secret-2024';
+const JWT_SECRET = process.env.JWT_SECRET || 'sga-secret-2024';
 
 export interface AuthRequest extends Request {
   user?: any;
