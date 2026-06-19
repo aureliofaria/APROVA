@@ -244,7 +244,9 @@ export async function isStepComplete(requestId: string, stepOrder: number): Prom
         const max = lvl.maxValue ?? Infinity;
         if (amount >= min && amount <= max) { required = lvl.requiredApprovers; break; }
       }
-      const approved = request.approvals.filter(a => a.decision === 'APPROVED').length;
+      const approved = new Set(
+        request.approvals.filter(a => a.decision === 'APPROVED').map(a => a.approverId)
+      ).size;
       if (approved < required) return false;
     }
   }

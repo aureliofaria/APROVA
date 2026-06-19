@@ -189,6 +189,10 @@ model Approval {
   decision   String
   comments   String?
   createdAt  DateTime @default(now())
+
+  // Impede que o mesmo aprovador registre mais de uma decisão na mesma etapa,
+  // o que poderia burlar a exigência de múltiplos aprovadores (requiredApprovers).
+  @@unique([requestId, stepOrder, approverId])
 }
 
 model AuditLog {

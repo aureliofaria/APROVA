@@ -4,7 +4,7 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload } from '../middleware/upload';
 import { createRequestTasks, advanceRequest } from '../services/workflow';
 import { canOpenRequestType } from '../lib/users';
-import path from 'path';
+import { APPROVER_ROLES } from '../config';
 
 const router = Router();
 
@@ -168,31 +168,75 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Verifica se o usuário tem autoridade para decidir (aprovar/rejeitar) a etapa atual.
+// Regras: nunca o próprio solicitante (segregação de funções); ADMIN sempre pode;
+// se a etapa tem alçada, o papel deve casar com o approverRole da faixa de valor;
+// caso contrário, qualquer papel de aprovador genérico.
+function authorizeDecision(
+  request: { initiatorId: string; amount: number | null; currentStep: number; flow: { steps: any[] } },
+  user: { id: string; role: string }
+): { ok: boolean; status: number; error: string } {
+  if (request.initiatorId === user.id) {
+    return { ok: false, status: 403, error: 'O solicitante não pode decidir a própria solicitação' };
+  }
+  if (user.role === 'ADMIN') return { ok: true, status: 200, error: '' };
+
+  const step = request.flow.steps.find((s: any) => s.order === request.currentStep);
+  const authLevels = step?.authLevels ?? [];
+
+  if (authLevels.length > 0) {
+    const amount = request.amount ?? 0;
+    const level =
+      authLevels.find((l: any) => amount >= (l.minValue ?? 0) && amount <= (l.maxValue ?? Infinity)) ??
+      authLevels[authLevels.length - 1];
+    if (user.role === level.approverRole) return { ok: true, status: 200, error: '' };
+    return { ok: false, status: 403, error: 'Seu papel não tem alçada para aprovar esta etapa' };
+  }
+
+  if (APPROVER_ROLES.includes(user.role as any)) return { ok: true, status: 200, error: '' };
+  return { ok: false, status: 403, error: 'Você não tem permissão para decidir esta solicitação' };
+}
+
 router.post('/:id/approve', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { comments } = req.body;
-    const request = await prisma.request.findUnique({ where: { id: req.params.id } });
+    const request = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
+    });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (request.status === 'COMPLETED' || request.status === 'REJECTED' || request.status === 'CANCELLED') {
+      res.status(409).json({ error: 'Solicitação não está em andamento' }); return;
+    }
 
-    await prisma.approval.create({
-      data: {
-        requestId: req.params.id,
-        approverId: req.user.id,
-        stepOrder: request.currentStep,
-        decision: 'APPROVED',
-        comments,
-      },
-    });
+    const authz = authorizeDecision(request, req.user);
+    if (!authz.ok) { res.status(authz.status).json({ error: authz.error }); return; }
 
-    await prisma.auditLog.create({
-      data: {
-        requestId: req.params.id,
-        userId: req.user.id,
-        userName: req.user.name,
-        action: 'APPROVED',
-        details: comments ? `Aprovado com comentário: ${comments}` : 'Aprovado',
-      },
-    });
+    try {
+      await prisma.$transaction([
+        prisma.approval.create({
+          data: {
+            requestId: req.params.id,
+            approverId: req.user.id,
+            stepOrder: request.currentStep,
+            decision: 'APPROVED',
+            comments,
+          },
+        }),
+        prisma.auditLog.create({
+          data: {
+            requestId: req.params.id,
+            userId: req.user.id,
+            userName: req.user.name,
+            action: 'APPROVED',
+            details: comments ? `Aprovado com comentário: ${comments}` : 'Aprovado',
+          },
+        }),
+      ]);
+    } catch (e: any) {
+      if (e?.code === 'P2002') { res.status(409).json({ error: 'Você já decidiu esta etapa' }); return; }
+      throw e;
+    }
 
     await advanceRequest(req.params.id);
     const updated = await prisma.request.findUnique({ where: { id: req.params.id } });
@@ -205,18 +249,32 @@ router.post('/:id/approve', authenticate, async (req: AuthRequest, res: Response
 router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { comments } = req.body;
-    const request = await prisma.request.findUnique({ where: { id: req.params.id } });
-    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-
-    await prisma.approval.create({
-      data: {
-        requestId: req.params.id,
-        approverId: req.user.id,
-        stepOrder: request.currentStep,
-        decision: 'REJECTED',
-        comments,
-      },
+    const request = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
     });
+    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (request.status === 'COMPLETED' || request.status === 'REJECTED' || request.status === 'CANCELLED') {
+      res.status(409).json({ error: 'Solicitação não está em andamento' }); return;
+    }
+
+    const authz = authorizeDecision(request, req.user);
+    if (!authz.ok) { res.status(authz.status).json({ error: authz.error }); return; }
+
+    try {
+      await prisma.approval.create({
+        data: {
+          requestId: req.params.id,
+          approverId: req.user.id,
+          stepOrder: request.currentStep,
+          decision: 'REJECTED',
+          comments,
+        },
+      });
+    } catch (e: any) {
+      if (e?.code === 'P2002') { res.status(409).json({ error: 'Você já decidiu esta etapa' }); return; }
+      throw e;
+    }
 
     await prisma.request.update({ where: { id: req.params.id }, data: { status: 'REJECTED' } });
 

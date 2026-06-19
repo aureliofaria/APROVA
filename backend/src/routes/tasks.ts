@@ -97,8 +97,21 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Garante que a tarefa pertence ao usuário (ou que ele é ADMIN). Retorna a tarefa
+// ou envia a resposta de erro apropriada e devolve null.
+async function loadOwnedTask(req: AuthRequest, res: Response) {
+  const task = await prisma.requestTask.findUnique({ where: { id: req.params.id } });
+  if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return null; }
+  if (task.assigneeId !== req.user.id && req.user.role !== 'ADMIN') {
+    res.status(403).json({ error: 'Esta tarefa não está atribuída a você' }); return null;
+  }
+  return task;
+}
+
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    const owned = await loadOwnedTask(req, res);
+    if (!owned) return;
     const { status, notes } = req.body;
     const task = await prisma.requestTask.update({
       where: { id: req.params.id },
@@ -112,6 +125,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 
 router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    const owned = await loadOwnedTask(req, res);
+    if (!owned) return;
     const { notes } = req.body;
     const task = await prisma.requestTask.update({
       where: { id: req.params.id },
@@ -137,6 +152,8 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
 
 router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response) => {
   try {
+    const owned = await loadOwnedTask(req, res);
+    if (!owned) return;
     const { notes } = req.body;
     const task = await prisma.requestTask.update({
       where: { id: req.params.id },
