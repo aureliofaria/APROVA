@@ -178,6 +178,54 @@ export async function processSlaExpiries(): Promise<number> {
 // e a atualização usa o currentStep atual como guarda otimista — se outra
 // execução concorrente já avançou a etapa, esta sai sem efeito (evita avanço/
 // duplicação de tarefas em cliques simultâneos).
+
+// Define o status-alvo do inventário conforme o tipo de fluxo: admissão/compra
+// alocam o recurso ao colaborador; desligamento devolve.
+function targetResourceStatus(flowType: string): 'ALLOCATED' | 'RETURNED' | null {
+  if (flowType === 'ONBOARDING' || flowType === 'PURCHASE') return 'ALLOCATED';
+  if (flowType === 'OFFBOARDING') return 'RETURNED';
+  return null;
+}
+
+// Aplica as transições de inventário da solicitação. Quando a etapa concluída
+// é específica de setor (activateOnSectorId), transiciona apenas os recursos
+// daquele setor; na conclusão final da solicitação, varre os recursos restantes.
+async function applyResourceTransitions(
+  request: { id: string; initiatorId: string; flow: { type: string; steps: { order: number; activateOnSectorId: string | null }[] } },
+  completedStepOrder: number,
+  isTerminal: boolean,
+  db: Db,
+) {
+  const target = targetResourceStatus(request.flow.type);
+  if (!target) return;
+
+  const transition = async (where: any, scope: string) => {
+    const matches = await db.requestResource.findMany({ where: { ...where, requestId: request.id, status: { not: target } }, select: { id: true } });
+    if (matches.length === 0) return;
+    await db.requestResource.updateMany({ where: { id: { in: matches.map(m => m.id) } }, data: { status: target } });
+    await db.auditLog.create({
+      data: {
+        requestId: request.id,
+        userId: request.initiatorId,
+        userName: 'Sistema',
+        action: target === 'ALLOCATED' ? 'RESOURCES_ALLOCATED' : 'RESOURCES_RETURNED',
+        details: `${matches.length} recurso(s) ${target === 'ALLOCATED' ? 'alocado(s)' : 'devolvido(s)'} (${scope})`,
+      },
+    });
+  };
+
+  const sectorIds = request.flow.steps
+    .filter(s => s.order === completedStepOrder && s.activateOnSectorId)
+    .map(s => s.activateOnSectorId as string);
+
+  if (sectorIds.length > 0) {
+    await transition({ resourceItem: { sectorId: { in: sectorIds } } }, 'etapa de setor');
+  }
+  if (isTerminal) {
+    await transition({}, 'conclusão do fluxo');
+  }
+}
+
 export async function advanceRequest(requestId: string) {
   await prisma.$transaction(async (tx) => {
     const request = await tx.request.findUnique({
@@ -210,12 +258,14 @@ export async function advanceRequest(requestId: string) {
       });
       if (upd.count === 0) return; // outra execução já avançou esta etapa
       await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
+      await applyResourceTransitions(request, request.currentStep, false, tx);
     } else {
       const upd = await tx.request.updateMany({
         where: { id: requestId, currentStep: request.currentStep, status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] } },
         data: { status: 'COMPLETED' },
       });
       if (upd.count === 0) return;
+      await applyResourceTransitions(request, request.currentStep, true, tx);
       await tx.auditLog.create({
         data: {
           requestId,

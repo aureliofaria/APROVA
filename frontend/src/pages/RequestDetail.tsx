@@ -13,6 +13,9 @@ import { ptBR } from 'date-fns/locale';
 const formatCurrency = (cents?: number) =>
   cents != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100) : '-';
 
+const resourceTypeLabel = (type?: string) =>
+  ({ EQUIPMENT: 'Equipamento', SYSTEM_ACCESS: 'Acesso a sistema', OTHER: 'Outro' } as Record<string, string>)[type ?? ''] ?? type ?? '-';
+
 function ActionModal({ title, onConfirm, onClose, action }: { title: string; onConfirm: (comments: string) => void; onClose: () => void; action: 'approve' | 'reject' }) {
   const [comments, setComments] = useState('');
   return (
@@ -196,6 +199,22 @@ export default function RequestDetail() {
                     {request.costCenter && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Centro de custo:</dt><dd className="text-sm text-gray-900">{request.costCenter}</dd></div>}
                     {request.justification && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Justificativa:</dt><dd className="text-sm text-gray-900">{request.justification}</dd></div>}
                   </dl>
+                </div>
+              )}
+              {request.resources && request.resources.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Recursos / Inventário</h3>
+                  <div className="space-y-2">
+                    {request.resources.map((r) => (
+                      <div key={r.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                        <div>
+                          <p className="text-sm text-gray-900">{r.resourceItem?.name}{r.quantity > 1 ? ` (×${r.quantity})` : ''}</p>
+                          <p className="text-xs text-gray-500">{resourceTypeLabel(r.resourceItem?.type)}{r.resourceItem?.sector ? ` · ${r.resourceItem.sector.name}` : ''}</p>
+                        </div>
+                        <StatusBadge status={r.status} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

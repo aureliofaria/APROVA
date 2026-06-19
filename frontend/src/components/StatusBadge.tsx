@@ -12,6 +12,7 @@ const statusMap: Record<string, { label: string; className: string }> = {
   APPROVED: { label: 'Aprovado', className: 'bg-green-100 text-green-800' },
   REJECTED: { label: 'Rejeitado', className: 'bg-red-100 text-red-800' },
   COMPLETED: { label: 'Concluído', className: 'bg-emerald-100 text-emerald-800' },
+  ALLOCATED: { label: 'Alocado', className: 'bg-teal-100 text-teal-800' },
   RETURNED: { label: 'Devolvido', className: 'bg-amber-100 text-amber-800' },
   CANCELLED: { label: 'Cancelado', className: 'bg-gray-100 text-gray-500' },
   // Task statuses (some overlap)

@@ -36,6 +36,20 @@ async function main() {
 
   console.log('Usuários criados');
 
+  // Catálogo de inventário (recursos alocáveis em admissões / devolvidos em desligamentos)
+  const notebook = await prisma.resourceItem.create({ data: { name: 'Notebook Dell Latitude', type: 'EQUIPMENT', sortOrder: 1 } });
+  const monitor = await prisma.resourceItem.create({ data: { name: 'Monitor 24"', type: 'EQUIPMENT', sortOrder: 2 } });
+  const cracha = await prisma.resourceItem.create({ data: { name: 'Crachá de Acesso', type: 'OTHER', sortOrder: 3 } });
+  await prisma.resourceItem.createMany({
+    data: [
+      { name: 'Acesso ao ERP', type: 'SYSTEM_ACCESS', sortOrder: 4 },
+      { name: 'Conta de E-mail Corporativo', type: 'SYSTEM_ACCESS', sortOrder: 5 },
+      { name: 'Licença Office 365', type: 'SYSTEM_ACCESS', sortOrder: 6 },
+    ],
+  });
+
+  console.log('Catálogo de inventário criado');
+
   // Flow 1: Admissão de Colaborador
   const admissaoFlow = await prisma.flowTemplate.create({
     data: {
@@ -209,6 +223,15 @@ async function main() {
       targetDepartment: 'Comercial',
       startDate: '2026-07-01',
     },
+  });
+
+  // Recursos alocados na admissão concluída
+  await prisma.requestResource.createMany({
+    data: [
+      { requestId: onboardingRequest.id, resourceItemId: notebook.id, status: 'ALLOCATED' },
+      { requestId: onboardingRequest.id, resourceItemId: monitor.id, status: 'ALLOCATED' },
+      { requestId: onboardingRequest.id, resourceItemId: cracha.id, status: 'ALLOCATED' },
+    ],
   });
 
   await prisma.auditLog.createMany({
