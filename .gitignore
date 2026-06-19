@@ -5,3 +5,6 @@ dist/
 *.db-journal
 uploads/
 .DS_Store
+
+# test artifacts
+backend/prisma/schema.test.prisma
