@@ -8,20 +8,34 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(cuid())
-  name         String
-  email        String      @unique
-  passwordHash String
-  role         String      @default("USER")
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                 String      @id @default(cuid())
+  name               String
+  email              String      @unique
+  passwordHash       String
+  role               String      @default("USER")
+  requestPermissions String? // JSON array of allowed request types; null = todos os tipos
+  departmentId       String?
+  department         Department? @relation(fields: [departmentId], references: [id])
+  sectorId           String?
+  sector             Sector?     @relation("SectorMembers", fields: [sectorId], references: [id])
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
-  initiatedRequests Request[]     @relation("Initiator")
-  assignedTasks     RequestTask[]
-  approvals         Approval[]
+  initiatedRequests       Request[]                @relation("Initiator")
+  assignedTasks           RequestTask[]
+  approvals               Approval[]
+  sectorRoles             SectorMember[]
+  comments                Comment[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+
+  // Inventário patrimonial
+  assetsInPossession    Asset[]          @relation("AssetUser")
+  assetMovementsFrom    AssetMovement[]  @relation("MovOrigemUser")
+  assetMovementsTo      AssetMovement[]  @relation("MovDestinoUser")
+  assetMovementsCreated AssetMovement[]  @relation("MovCreator")
+  inventoryCounts       InventoryCount[] @relation("InventoryCountCreator")
 }
 
 model Department {
@@ -29,6 +43,41 @@ model Department {
   name      String
   createdAt DateTime @default(now())
   users     User[]
+
+  // Inventário patrimonial
+  assets             Asset[]
+  assetMovementsFrom AssetMovement[]  @relation("MovOrigemDept")
+  assetMovementsTo   AssetMovement[]  @relation("MovDestinoDept")
+  inventoryCounts    InventoryCount[]
+}
+
+model Sector {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members        SectorMember[]
+  users          User[]         @relation("SectorMembers")
+  flowTemplates  FlowTemplate[] @relation("FlowSector")
+  flowSteps      FlowStep[]     @relation("StepSector")
+  activatedSteps FlowStep[]     @relation("StepActivationSector")
+  requests       Request[]      @relation("RequestSector")
+  resourceItems  ResourceItem[] @relation("SectorResources")
+}
+
+model SectorMember {
+  id        String   @id @default(cuid())
+  sectorId  String
+  sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String // LIDER, PROTETOR
+  createdAt DateTime @default(now())
+
+  @@unique([sectorId, userId, role])
 }
 
 model FlowTemplate {
@@ -36,6 +85,9 @@ model FlowTemplate {
   name        String
   description String?
   type        String
+  scope       String     @default("INTRA") // INTRA, INTER
+  sectorId    String?
+  sector      Sector?    @relation("FlowSector", fields: [sectorId], references: [id])
   isActive    Boolean    @default(true)
   steps       FlowStep[]
   requests    Request[]
@@ -53,6 +105,13 @@ model FlowStep {
   requiredRole       String?
   requiresAttachment Boolean              @default(false)
   deadlineHours      Int?
+  handlingSectorId   String?
+  handlingSector     Sector?              @relation("StepSector", fields: [handlingSectorId], references: [id])
+  slaExpiry          String               @default("KEEP_WITH_RESPONSIBLE")
+  conditions         String?
+  activateOnSectorId String?
+  activateOnSector   Sector?              @relation("StepActivationSector", fields: [activateOnSectorId], references: [id])
+  collectsResources  Boolean              @default(false)
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   createdAt          DateTime             @default(now())
@@ -63,56 +122,108 @@ model AuthorizationLevel {
   flowStepId        String
   flowStep          FlowStep @relation(fields: [flowStepId], references: [id], onDelete: Cascade)
   name              String
-  minValue          Float?
-  maxValue          Float?
+  minValueCents     Int?
+  maxValueCents     Int?
   requiredApprovers Int      @default(1)
   approverRole      String
   deadlineHours     Int?
 }
 
 model Request {
-  id               String        @id @default(cuid())
+  id               String            @id @default(cuid())
   flowId           String
-  flow             FlowTemplate  @relation(fields: [flowId], references: [id])
+  flow             FlowTemplate      @relation(fields: [flowId], references: [id])
   initiatorId      String
-  initiator        User          @relation("Initiator", fields: [initiatorId], references: [id])
+  initiator        User              @relation("Initiator", fields: [initiatorId], references: [id])
+  sectorId         String?
+  sector           Sector?           @relation("RequestSector", fields: [sectorId], references: [id])
   title            String
   description      String?
-  status           String        @default("PENDING")
-  currentStep      Int           @default(0)
+  status           String            @default("PENDING")
+  currentStep      Int               @default(0)
   targetEmployee   String?
   targetDepartment String?
   startDate        String?
-  amount           Float?
-  currency         String        @default("BRL")
+  amountCents      Int?
+  currency         String            @default("BRL")
   supplier         String?
   costCenter       String?
   justification    String?
+  vacancyType      String?
+  replacementName  String?
   tasks            RequestTask[]
+  resources        RequestResource[]
   attachments      Attachment[]
   approvals        Approval[]
   auditLogs        AuditLog[]
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  assetMovements   AssetMovement[]
+  comments         Comment[]
+  notifications    Notification[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  requestId String
+  request   Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stepOrder Int?
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([requestId, stepOrder])
+}
+
+model NotificationPreference {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   String // IN_APP | TEAMS | OUTLOOK
+  eventType String // TASK_ASSIGNED | REQUEST_REJECTED | REQUEST_COMPLETED | COMMENT_ADDED
+  enabled   Boolean @default(true)
+
+  @@unique([userId, channel, eventType])
+  @@index([userId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestId String?
+  request   Request?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  channel   String    @default("IN_APP") // IN_APP | TEAMS | OUTLOOK
+  status    String    @default("UNREAD") // IN_APP: UNREAD -> READ; externos: PENDING -> SENT (dispatcher futuro)
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  @@index([userId, status])
 }
 
 model RequestTask {
-  id          String       @id @default(cuid())
-  requestId   String
-  request     Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  stepId      String
-  step        FlowStep     @relation(fields: [stepId], references: [id])
-  assigneeId  String
-  assignee    User         @relation(fields: [assigneeId], references: [id])
-  title       String
-  description String?
-  status      String       @default("PENDING")
-  dueDate     DateTime?
-  completedAt DateTime?
-  notes       String?
-  attachments Attachment[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id           String       @id @default(cuid())
+  requestId    String
+  request      Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stepId       String
+  step         FlowStep     @relation(fields: [stepId], references: [id])
+  assigneeId   String
+  assignee     User         @relation(fields: [assigneeId], references: [id])
+  title        String
+  description  String?
+  status       String       @default("PENDING")
+  dueDate      DateTime?
+  completedAt  DateTime?
+  notes        String?
+  slaEscalated Boolean      @default(false)
+  attachments  Attachment[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 }
 
 model Attachment {
@@ -140,6 +251,10 @@ model Approval {
   decision   String
   comments   String?
   createdAt  DateTime @default(now())
+
+  // Impede que o mesmo aprovador registre mais de uma decisão na mesma etapa,
+  // o que poderia burlar a exigência de múltiplos aprovadores (requiredApprovers).
+  @@unique([requestId, stepOrder, approverId])
 }
 
 model AuditLog {
@@ -151,4 +266,172 @@ model AuditLog {
   action    String
   details   String?
   createdAt DateTime @default(now())
+}
+
+model ResourceItem {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   @default("EQUIPMENT") // EQUIPMENT | SYSTEM_ACCESS | OTHER
+  sectorId  String?
+  sector    Sector?  @relation("SectorResources", fields: [sectorId], references: [id])
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  requestResources RequestResource[]
+}
+
+model RequestResource {
+  id             String       @id @default(cuid())
+  requestId      String
+  request        Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  resourceItemId String
+  resourceItem   ResourceItem @relation(fields: [resourceItemId], references: [id])
+  quantity       Int          @default(1)
+  notes          String?
+  status         String       @default("PENDING") // PENDING | ALLOCATED | RETURNED
+  // Ponte com o inventário patrimonial: unidade física que cumpre esta linha de
+  // intenção (quando aplicável). Nula para itens intangíveis (ex.: acessos).
+  assetId        String?
+  asset          Asset?       @relation(fields: [assetId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@unique([requestId, resourceItemId])
+}
+
+// ===========================================================================
+// Inventário patrimonial (TI e Administrativo) — rastreio de ativos físicos,
+// movimentações (log imutável, vinculável a uma Request do workflow) e contagem.
+// ===========================================================================
+
+model InventoryItem {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  // TI | ADMINISTRATIVO
+  type        String
+  // HARDWARE | PERIFERICO | SMARTPHONE | CHIP | MOBILIARIO | OUTROS
+  category    String
+  brand       String?
+  model       String?
+  unit        String   @default("UN")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets Asset[]
+}
+
+model Warehouse {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assets Asset[]
+}
+
+model Asset {
+  id                String        @id @default(cuid())
+  itemId            String
+  item              InventoryItem @relation(fields: [itemId], references: [id])
+  // número de patrimônio / etiqueta
+  tag               String?       @unique
+  serialNumber      String?
+  // IMEI para smartphones
+  imei              String?
+  // número da linha para chips/SIM cards
+  phoneNumber       String?
+  // DISPONIVEL | ATIVO | MANUTENCAO | EMPRESTADO | RESERVADO | DESCARTADO
+  status            String        @default("DISPONIVEL")
+  // NOVO | BOM | REGULAR | RUIM
+  condition         String        @default("BOM")
+  purchaseDate      DateTime?
+  supplier          String?
+  invoiceNumber     String?
+  // valor da NF em centavos (Int), consistente com o restante do APROVA
+  invoiceValueCents Int?
+  // localização (almoxarifado — quando não alocado a departamento)
+  warehouseId       String?
+  warehouse         Warehouse?    @relation(fields: [warehouseId], references: [id])
+  // setor/departamento responsável atual
+  departmentId      String?
+  department        Department?   @relation(fields: [departmentId], references: [id])
+  // usuário em posse atual
+  userId            String?
+  user              User?         @relation("AssetUser", fields: [userId], references: [id])
+  notes             String?
+  isActive          Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  movements        AssetMovement[]
+  countItems       InventoryCountItem[]
+  requestResources RequestResource[]
+}
+
+model AssetMovement {
+  id               String      @id @default(cuid())
+  assetId          String
+  asset            Asset       @relation(fields: [assetId], references: [id])
+  // ENTRADA | ALOCACAO | DEVOLUCAO | MANUTENCAO | RETORNO_MANUTENCAO
+  // DESCARTE | TRANSFERENCIA | EMPRESTIMO | AJUSTE_STATUS
+  type             String
+  movementDate     DateTime    @default(now())
+  fromDepartmentId String?
+  fromDepartment   Department? @relation("MovOrigemDept", fields: [fromDepartmentId], references: [id])
+  toDepartmentId   String?
+  toDepartment     Department? @relation("MovDestinoDept", fields: [toDepartmentId], references: [id])
+  fromUserId       String?
+  fromUser         User?       @relation("MovOrigemUser", fields: [fromUserId], references: [id])
+  toUserId         String?
+  toUser           User?       @relation("MovDestinoUser", fields: [toUserId], references: [id])
+  previousStatus   String?
+  newStatus        String?
+  // vínculo opcional com solicitação do workflow APROVA
+  requestId        String?
+  request          Request?    @relation(fields: [requestId], references: [id])
+  reason           String?
+  notes            String?
+  createdById      String
+  createdBy        User        @relation("MovCreator", fields: [createdById], references: [id])
+  createdAt        DateTime    @default(now())
+}
+
+model InventoryCount {
+  id           String      @id @default(cuid())
+  // RASCUNHO | EM_ANDAMENTO | CONCLUIDA | CANCELADA
+  status       String      @default("RASCUNHO")
+  // GERAL | TI | ADMINISTRATIVO | SETOR
+  type         String      @default("GERAL")
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  notes        String?
+  createdById  String
+  createdBy    User        @relation("InventoryCountCreator", fields: [createdById], references: [id])
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  items InventoryCountItem[]
+}
+
+model InventoryCountItem {
+  id            String         @id @default(cuid())
+  countId       String
+  count         InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset          @relation(fields: [assetId], references: [id])
+  // encontrado na contagem física?
+  found         Boolean?
+  foundLocation String?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([countId, assetId])
 }

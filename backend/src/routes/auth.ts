@@ -3,9 +3,14 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { serializeUser } from '../lib/users';
+import { config } from '../config';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'sga-secret-2024';
+
+function signToken(userId: string): string {
+  return jwt.sign({ userId }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
+}
 
 router.post('/login', async (req: Request, res: Response) => {
   try {
@@ -27,9 +32,8 @@ router.post('/login', async (req: Request, res: Response) => {
       res.status(401).json({ error: 'Credenciais inválidas' });
       return;
     }
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    const { passwordHash: _, ...userOut } = user;
-    res.json({ token, user: userOut });
+    const token = signToken(user.id);
+    res.json({ token, user: serializeUser(user) });
   } catch (err) {
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
@@ -37,7 +41,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role, departmentId } = req.body;
+    const { name, email, password, departmentId } = req.body;
     if (!name || !email || !password) {
       res.status(400).json({ error: 'Nome, email e senha são obrigatórios' });
       return;
@@ -47,6 +51,10 @@ router.post('/register', async (req: Request, res: Response) => {
       res.status(409).json({ error: 'Email já cadastrado' });
       return;
     }
+    // O `role` NUNCA é aceito do corpo no registro público (evita escalonamento de
+    // privilégio). Apenas o primeiro usuário do sistema é promovido a ADMIN;
+    // os demais são USER. A criação de usuários com papel específico é feita por
+    // um ADMIN via POST /api/users (rota protegida).
     const count = await prisma.user.count();
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
@@ -54,22 +62,20 @@ router.post('/register', async (req: Request, res: Response) => {
         name,
         email,
         passwordHash,
-        role: count === 0 ? 'ADMIN' : (role || 'USER'),
+        role: count === 0 ? 'ADMIN' : 'USER',
         departmentId: departmentId || null,
       },
       include: { department: true },
     });
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    const { passwordHash: _, ...userOut } = user;
-    res.status(201).json({ token, user: userOut });
+    const token = signToken(user.id);
+    res.status(201).json({ token, user: serializeUser(user) });
   } catch (err) {
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
-  const { passwordHash: _, ...userOut } = req.user;
-  res.json(userOut);
+  res.json(serializeUser(req.user));
 });
 
 export default router;
