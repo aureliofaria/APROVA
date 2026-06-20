@@ -151,5 +151,9 @@ o que reduz muito o atrito. Passos:
   `requestId`) e atualizam `Asset.status` (`ATIVO`/`DISPONIVEL`) na mesma
   transação. Endpoint `POST /requests/:id/resources/:resourceId/asset` vincula a
   unidade (reserva em admissão/compra). Itens intangíveis seguem só com status lógico.
-- **Fase 3** — UI de inventário (catálogo, ativos, movimentações, contagem) e a
-  seleção de `Asset` na etapa de TI do onboarding.
+- **Fase 3** ✅ **concluída** — UI de inventário (`/inventory`, ADMIN/MANAGER) com
+  abas Ativos (lista/filtros/cadastro/movimentação), Catálogo (lista/cadastro) e
+  Movimentações (log global, com link para a solicitação). Seleção de `Asset` por
+  linha de recurso no detalhe da solicitação (admissão/desligamento), consumindo
+  o endpoint de vínculo da Fase 2. Contagem física (`InventoryCount`) fica como
+  refinamento futuro (backend já disponível em `/api/inventory/counts`).

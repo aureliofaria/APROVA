@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { requestsApi } from '../services/api';
+import { requestsApi, inventoryApi } from '../services/api';
 import { StatusBadge, FlowTypeBadge, roleLabel } from '../components/StatusBadge';
 import FileUpload from '../components/FileUpload';
 import Header from '../components/Header';
@@ -15,6 +15,69 @@ const formatCurrency = (cents?: number) =>
 
 const resourceTypeLabel = (type?: string) =>
   ({ EQUIPMENT: 'Equipamento', SYSTEM_ACCESS: 'Acesso a sistema', OTHER: 'Outro' } as Record<string, string>)[type ?? ''] ?? type ?? '-';
+
+// Linha de recurso da solicitação, com vínculo opcional a uma unidade física do
+// inventário (cumprimento físico — Fase 2). Só oferece o vínculo para itens
+// físicos (EQUIPMENT) em fluxos de admissão/desligamento ainda pendentes.
+function ResourceRow({ requestId, requestType, resource }: { requestId: string; requestType?: string; resource: any }) {
+  const qc = useQueryClient();
+  const [picking, setPicking] = useState(false);
+  const isPhysical = resource.resourceItem?.type === 'EQUIPMENT';
+  const allocates = requestType === 'ONBOARDING' || requestType === 'PURCHASE';
+  const linkable = isPhysical && resource.status === 'PENDING' && (allocates || requestType === 'OFFBOARDING');
+
+  const { data: assets = [] } = useQuery({
+    queryKey: ['link-assets', requestId, resource.id],
+    queryFn: () => inventoryApi.getAssets({ status: allocates ? 'DISPONIVEL' : 'ATIVO' }),
+    enabled: picking,
+  });
+
+  const link = useMutation({
+    mutationFn: (assetId: string | null) => requestsApi.linkAsset(requestId, resource.id, assetId),
+    onSuccess: () => { toast.success('Inventário atualizado!'); qc.invalidateQueries({ queryKey: ['request', requestId] }); setPicking(false); },
+    onError: () => toast.error('Não foi possível vincular o ativo'),
+  });
+
+  return (
+    <div className="p-3 border border-gray-200 rounded-lg">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-gray-900">{resource.resourceItem?.name}{resource.quantity > 1 ? ` (×${resource.quantity})` : ''}</p>
+          <p className="text-xs text-gray-500">
+            {resourceTypeLabel(resource.resourceItem?.type)}
+            {resource.resourceItem?.sector ? ` · ${resource.resourceItem.sector.name}` : ''}
+            {resource.asset ? ` · 🏷️ ${resource.asset.tag || resource.asset.item?.name || 'unidade vinculada'}` : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge status={resource.status} />
+          {linkable && !resource.assetId && (
+            <button onClick={() => setPicking((v) => !v)} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 font-medium">
+              {picking ? 'Fechar' : 'Vincular ativo'}
+            </button>
+          )}
+          {resource.assetId && resource.status === 'PENDING' && (
+            <button onClick={() => link.mutate(null)} className="text-xs text-gray-400 hover:text-red-600">Desvincular</button>
+          )}
+        </div>
+      </div>
+      {picking && (
+        <div className="mt-3 flex flex-wrap gap-2 items-center">
+          <select
+            onChange={(e) => e.target.value && link.mutate(e.target.value)}
+            defaultValue=""
+            className="flex-1 min-w-[200px] px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500"
+          >
+            <option value="" disabled>{assets.length ? 'Selecione uma unidade…' : 'Nenhuma unidade disponível'}</option>
+            {assets.map((a) => (
+              <option key={a.id} value={a.id}>{a.tag || a.serialNumber || a.id.slice(0, 8)} — {a.item?.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ActionModal({ title, onConfirm, onClose, action }: { title: string; onConfirm: (comments: string) => void; onClose: () => void; action: 'approve' | 'reject' }) {
   const [comments, setComments] = useState('');
@@ -206,13 +269,7 @@ export default function RequestDetail() {
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">Recursos / Inventário</h3>
                   <div className="space-y-2">
                     {request.resources.map((r) => (
-                      <div key={r.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                        <div>
-                          <p className="text-sm text-gray-900">{r.resourceItem?.name}{r.quantity > 1 ? ` (×${r.quantity})` : ''}</p>
-                          <p className="text-xs text-gray-500">{resourceTypeLabel(r.resourceItem?.type)}{r.resourceItem?.sector ? ` · ${r.resourceItem.sector.name}` : ''}</p>
-                        </div>
-                        <StatusBadge status={r.status} />
-                      </div>
+                      <ResourceRow key={r.id} requestId={request.id} requestType={request.flow?.type} resource={r} />
                     ))}
                   </div>
                 </div>

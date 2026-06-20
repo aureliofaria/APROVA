@@ -14,12 +14,13 @@ import FlowEditor from './pages/FlowEditor';
 import Setores from './pages/Setores';
 import Users from './pages/Users';
 import ResourceManagement from './pages/ResourceManagement';
+import Inventory from './pages/Inventory';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
 });
 
-function ProtectedRoute({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
+function ProtectedRoute({ children, adminOnly = false, roles }: { children: React.ReactNode; adminOnly?: boolean; roles?: string[] }) {
   const { isAuthenticated, isLoading, user } = useAuth();
   if (isLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -28,6 +29,7 @@ function ProtectedRoute({ children, adminOnly = false }: { children: React.React
   );
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (adminOnly && user?.role !== 'ADMIN') return <Navigate to="/dashboard" replace />;
+  if (roles && !roles.includes(user?.role || '')) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -49,6 +51,7 @@ function AppRoutes() {
         <Route path="/flows/:id/edit" element={<ProtectedRoute adminOnly><FlowEditor /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute adminOnly><Users /></ProtectedRoute>} />
         <Route path="/resources" element={<ProtectedRoute adminOnly><ResourceManagement /></ProtectedRoute>} />
+        <Route path="/inventory" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Inventory /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

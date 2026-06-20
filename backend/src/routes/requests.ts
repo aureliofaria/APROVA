@@ -50,7 +50,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
         attachments: { orderBy: { createdAt: 'desc' } },
         approvals: { include: { approver: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'desc' } },
         auditLogs: { orderBy: { createdAt: 'asc' } },
-        resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } } } },
+        resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } }, asset: { include: { item: { select: { name: true } } } } } },
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
@@ -124,7 +124,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         flow: true,
         initiator: { select: { id: true, name: true, email: true } },
         tasks: true,
-        resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } } } },
+        resources: { include: { resourceItem: { include: { sector: { select: { id: true, name: true } } } }, asset: { include: { item: { select: { name: true } } } } } },
       },
     });
     res.status(201).json(full);

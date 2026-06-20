@@ -71,6 +71,76 @@ export interface RequestResource {
   quantity: number;
   notes?: string;
   status: 'PENDING' | 'ALLOCATED' | 'RETURNED';
+  assetId?: string | null;
+  asset?: Asset | null;
+  createdAt: string;
+}
+
+// ===== Inventário patrimonial =====
+export interface InventoryItem {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  type: 'TI' | 'ADMINISTRATIVO';
+  category: 'HARDWARE' | 'PERIFERICO' | 'SMARTPHONE' | 'CHIP' | 'MOBILIARIO' | 'OUTROS';
+  brand?: string | null;
+  model?: string | null;
+  unit: string;
+  isActive: boolean;
+  createdAt: string;
+  assets?: Asset[];
+}
+
+export interface Warehouse {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export type AssetStatus = 'DISPONIVEL' | 'ATIVO' | 'MANUTENCAO' | 'EMPRESTADO' | 'RESERVADO' | 'DESCARTADO';
+
+export interface Asset {
+  id: string;
+  itemId: string;
+  item?: InventoryItem;
+  tag?: string | null;
+  serialNumber?: string | null;
+  imei?: string | null;
+  phoneNumber?: string | null;
+  status: AssetStatus;
+  condition: 'NOVO' | 'BOM' | 'REGULAR' | 'RUIM';
+  purchaseDate?: string | null;
+  supplier?: string | null;
+  invoiceNumber?: string | null;
+  invoiceValueCents?: number | null;
+  warehouseId?: string | null;
+  warehouse?: Warehouse | null;
+  departmentId?: string | null;
+  department?: { id: string; name: string } | null;
+  userId?: string | null;
+  user?: { id: string; name: string } | null;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  movements?: AssetMovement[];
+}
+
+export interface AssetMovement {
+  id: string;
+  assetId: string;
+  asset?: Asset;
+  type: string;
+  movementDate: string;
+  previousStatus?: string | null;
+  newStatus?: string | null;
+  requestId?: string | null;
+  reason?: string | null;
+  notes?: string | null;
+  createdById: string;
+  createdBy?: { id: string; name: string };
   createdAt: string;
 }
 

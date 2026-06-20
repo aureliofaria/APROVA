@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem } from '../types';
+import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse } from '../types';
 
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
@@ -115,6 +115,9 @@ export const requestsApi = {
   },
   getAttachments: (id: string) => api.get<Attachment[]>(`/requests/${id}/attachments`).then((r) => r.data),
   getAuditLog: (id: string) => api.get<AuditLog[]>(`/requests/${id}/audit`).then((r) => r.data),
+  // Vincula/desvincula uma unidade física do inventário a uma linha de recurso.
+  linkAsset: (id: string, resourceId: string, assetId: string | null) =>
+    api.post(`/requests/${id}/resources/${resourceId}/asset`, { assetId }).then((r) => r.data),
 };
 
 // Tasks
@@ -146,6 +149,33 @@ export const resourcesApi = {
   update: (id: string, data: Partial<ResourceItem>) =>
     api.put<ResourceItem>(`/resources/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/resources/${id}`).then(r => r.data),
+};
+
+// Inventário patrimonial
+export const inventoryApi = {
+  // Catálogo
+  getItems: (params?: { type?: string; category?: string; isActive?: string }) =>
+    api.get<InventoryItem[]>('/inventory/items', { params }).then(r => r.data),
+  createItem: (data: Partial<InventoryItem>) =>
+    api.post<InventoryItem>('/inventory/items', data).then(r => r.data),
+  updateItem: (id: string, data: Partial<InventoryItem>) =>
+    api.put<InventoryItem>(`/inventory/items/${id}`, data).then(r => r.data),
+  deleteItem: (id: string) => api.delete(`/inventory/items/${id}`).then(r => r.data),
+  // Ativos
+  getAssets: (params?: { status?: string; type?: string; departmentId?: string; userId?: string; search?: string }) =>
+    api.get<Asset[]>('/inventory/assets', { params }).then(r => r.data),
+  getAsset: (id: string) => api.get<Asset>(`/inventory/assets/${id}`).then(r => r.data),
+  createAsset: (data: Partial<Asset>) =>
+    api.post<Asset>('/inventory/assets', data).then(r => r.data),
+  updateAsset: (id: string, data: Partial<Asset>) =>
+    api.put<Asset>(`/inventory/assets/${id}`, data).then(r => r.data),
+  registerMovement: (assetId: string, data: Record<string, unknown>) =>
+    api.post<AssetMovement>(`/inventory/assets/${assetId}/movements`, data).then(r => r.data),
+  // Log global de movimentações
+  getMovements: (params?: { type?: string; assetId?: string; requestId?: string }) =>
+    api.get<AssetMovement[]>('/inventory/movements', { params }).then(r => r.data),
+  // Almoxarifados
+  getWarehouses: () => api.get<Warehouse[]>('/inventory/warehouses').then(r => r.data),
 };
 
 export default api;
