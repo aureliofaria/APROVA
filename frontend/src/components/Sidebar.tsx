@@ -13,6 +13,7 @@ const navItems = [
   { path: '/inventory', label: 'Inventário', icon: '📦', roles: ['ADMIN', 'MANAGER'] },
   { path: '/flows', label: 'Fluxos', icon: '⚙️', roles: ['ADMIN'] },
   { path: '/users', label: 'Usuários', icon: '👥', roles: ['ADMIN'] },
+  { path: '/audit', label: 'Auditoria', icon: '🔎', roles: ['ADMIN'] },
 ];
 
 export default function Sidebar() {

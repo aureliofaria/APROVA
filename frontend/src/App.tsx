@@ -15,6 +15,7 @@ import Setores from './pages/Setores';
 import Users from './pages/Users';
 import ResourceManagement from './pages/ResourceManagement';
 import Inventory from './pages/Inventory';
+import AuditLog from './pages/AuditLog';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -52,6 +53,7 @@ function AppRoutes() {
         <Route path="/users" element={<ProtectedRoute adminOnly><Users /></ProtectedRoute>} />
         <Route path="/resources" element={<ProtectedRoute adminOnly><ResourceManagement /></ProtectedRoute>} />
         <Route path="/inventory" element={<ProtectedRoute roles={['ADMIN', 'MANAGER']}><Inventory /></ProtectedRoute>} />
+        <Route path="/audit" element={<ProtectedRoute adminOnly><AuditLog /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

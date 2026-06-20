@@ -151,6 +151,15 @@ export const resourcesApi = {
   delete: (id: string) => api.delete(`/resources/${id}`).then(r => r.data),
 };
 
+// Auditoria global (somente ADMIN) — trilha filtrável + export Excel
+export const auditApi = {
+  list: (params?: { requestId?: string; userId?: string; action?: string; from?: string; to?: string; limit?: number }) =>
+    api.get<AuditLog[]>('/audit-logs', { params }).then(r => r.data),
+  actions: () => api.get<string[]>('/audit-logs/actions').then(r => r.data),
+  export: (params?: { action?: string; from?: string; to?: string }) =>
+    api.get('/audit-logs/export', { params, responseType: 'blob' }).then(r => r.data as Blob),
+};
+
 // Relatórios / SLA (somente ADMIN/MANAGER)
 export const reportsApi = {
   dashboard: (params?: { from?: string; to?: string; flowType?: string }) =>

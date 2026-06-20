@@ -228,6 +228,7 @@ export interface AuditLog {
   action: string;
   details?: string;
   createdAt: string;
+  request?: { title: string } | null;
 }
 
 export interface RequestTask {
