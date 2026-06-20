@@ -37,6 +37,10 @@ export const config = {
   jwtSecret: resolveJwtSecret(),
   jwtExpiresIn: '7d' as const,
   corsOrigins: resolveCorsOrigins(),
+  // Canais externos (Teams/Outlook) só são materializados quando habilitados via
+  // ambiente E o envio passar por conta corporativa M365 com validação humana.
+  // Desligado por padrão — apenas IN_APP é entregue hoje.
+  externalNotificationsEnabled: process.env.NOTIFICATIONS_EXTERNAL_ENABLED === 'true',
 };
 
 // Papéis que podem atuar como aprovadores quando uma etapa não define alçada explícita.

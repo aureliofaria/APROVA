@@ -5,6 +5,7 @@ import { upload } from '../middleware/upload';
 import { createRequestTasks, advanceRequest } from '../services/workflow';
 import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
+import { notify, notifyMany } from '../services/notifications';
 
 const router = Router();
 
@@ -292,6 +293,11 @@ router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response)
       },
     });
 
+    // Notifica o solicitante sobre a recusa (com o motivo).
+    if (request.initiatorId !== req.user.id) {
+      await notify(prisma, { userId: request.initiatorId, type: 'REQUEST_REJECTED', title: 'Solicitação rejeitada', body: `Sua solicitação "${request.title}" foi rejeitada: ${comments}`, requestId: req.params.id });
+    }
+
     res.json({ message: 'Solicitação rejeitada' });
   } catch {
     res.status(500).json({ error: 'Erro ao rejeitar solicitação' });
@@ -470,6 +476,9 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res: Respons
           details: stepOrder != null ? `Comentário na etapa ${stepOrder}` : 'Comentário geral',
         },
       });
+      // Notifica os envolvidos (iniciador, responsáveis, aprovadores), menos o autor.
+      const recipients = [inv.initiatorId, ...inv.tasks.map((t) => t.assigneeId), ...inv.approvals.map((a) => a.approverId)];
+      await notifyMany(tx, recipients, { type: 'COMMENT_ADDED', title: 'Novo comentário', body: `${req.user.name} comentou em "${inv.title}".`, requestId: req.params.id }, req.user.id);
       return created;
     });
     res.status(201).json(comment);

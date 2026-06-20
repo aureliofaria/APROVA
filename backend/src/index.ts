@@ -15,6 +15,7 @@ import resourcesRouter from './routes/resources';
 import inventoryRouter from './routes/inventory';
 import reportsRouter from './routes/reports';
 import auditLogsRouter from './routes/audit-logs';
+import notificationsRouter from './routes/notifications';
 
 const app = express();
 const PORT = config.port;
@@ -55,6 +56,7 @@ app.use('/api/resources', resourcesRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
+app.use('/api/notifications', notificationsRouter);
 
 app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
 export default app;

@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { notify } from './notifications';
 
 // Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
 // funções de workflow sejam compostas dentro de uma transação atômica.
@@ -89,6 +90,10 @@ export async function createRequestTasks(requestId: string, flowId: string, step
           dueDate,
         },
       });
+      // Notifica o responsável sobre a nova tarefa (exceto o próprio iniciador).
+      if (assignee.id !== request.initiatorId) {
+        await notify(db, { userId: assignee.id, type: 'TASK_ASSIGNED', title: 'Nova tarefa atribuída', body: `Você tem uma tarefa em "${request.title}": ${step.name}.`, requestId });
+      }
       tasksCreated++;
     }
   }
@@ -303,6 +308,7 @@ export async function advanceRequest(requestId: string) {
           details: 'Solicitação concluída com sucesso',
         },
       });
+      await notify(tx, { userId: request.initiatorId, type: 'REQUEST_COMPLETED', title: 'Solicitação concluída', body: `Sua solicitação "${request.title}" foi concluída.`, requestId });
     }
   });
 }

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse, DashboardReport, Comment } from '../types';
+import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse, DashboardReport, Comment, Notification, NotificationPreference } from '../types';
 
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
@@ -162,6 +162,17 @@ export const auditApi = {
   actions: () => api.get<string[]>('/audit-logs/actions').then(r => r.data),
   export: (params?: { action?: string; from?: string; to?: string }) =>
     api.get('/audit-logs/export', { params, responseType: 'blob' }).then(r => r.data as Blob),
+};
+
+// Notificações in-app + preferências
+export const notificationsApi = {
+  list: (status?: string) => api.get<Notification[]>('/notifications', { params: { status } }).then(r => r.data),
+  unreadCount: () => api.get<{ count: number }>('/notifications/unread-count').then(r => r.data.count),
+  markRead: (id: string) => api.post(`/notifications/${id}/read`).then(r => r.data),
+  readAll: () => api.post('/notifications/read-all').then(r => r.data),
+  getPreferences: () => api.get<NotificationPreference[]>('/notifications/preferences').then(r => r.data),
+  updatePreferences: (preferences: { channel: string; eventType: string; enabled: boolean }[]) =>
+    api.put<NotificationPreference[]>('/notifications/preferences', { preferences }).then(r => r.data),
 };
 
 // Relatórios / SLA (somente ADMIN/MANAGER)

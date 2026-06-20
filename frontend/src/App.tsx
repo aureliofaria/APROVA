@@ -16,6 +16,7 @@ import Users from './pages/Users';
 import ResourceManagement from './pages/ResourceManagement';
 import Inventory from './pages/Inventory';
 import AuditLog from './pages/AuditLog';
+import Notifications from './pages/Notifications';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="/requests/new" element={<NewRequest />} />
         <Route path="/requests/:id" element={<RequestDetail />} />
         <Route path="/tasks" element={<MyTasks />} />
+        <Route path="/notifications" element={<Notifications />} />
         <Route path="/sectors" element={<ProtectedRoute adminOnly><Setores /></ProtectedRoute>} />
         <Route path="/flows" element={<ProtectedRoute adminOnly><FlowTemplates /></ProtectedRoute>} />
         <Route path="/flows/new" element={<ProtectedRoute adminOnly><FlowEditor /></ProtectedRoute>} />

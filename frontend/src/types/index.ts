@@ -138,6 +138,27 @@ export interface Comment {
   createdAt: string;
 }
 
+export interface Notification {
+  id: string;
+  userId: string;
+  requestId?: string | null;
+  type: string;
+  title: string;
+  body?: string | null;
+  channel: string;
+  status: 'UNREAD' | 'READ' | 'PENDING' | 'SENT';
+  createdAt: string;
+  readAt?: string | null;
+}
+
+export interface NotificationPreference {
+  id: string;
+  userId: string;
+  channel: string;
+  eventType: string;
+  enabled: boolean;
+}
+
 export interface DashboardReport {
   range: { from: string; to: string };
   totals: { requests: number; open: number; completed: number; rejected: number };

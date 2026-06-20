@@ -22,11 +22,13 @@ model User {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  initiatedRequests Request[]      @relation("Initiator")
-  assignedTasks     RequestTask[]
-  approvals         Approval[]
-  sectorRoles       SectorMember[]
-  comments          Comment[]
+  initiatedRequests       Request[]                @relation("Initiator")
+  assignedTasks           RequestTask[]
+  approvals               Approval[]
+  sectorRoles             SectorMember[]
+  comments                Comment[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
 
   // Inventário patrimonial
   assetsInPossession    Asset[]          @relation("AssetUser")
@@ -156,6 +158,7 @@ model Request {
   auditLogs        AuditLog[]
   assetMovements   AssetMovement[]
   comments         Comment[]
+  notifications    Notification[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 }
@@ -172,6 +175,35 @@ model Comment {
 
   @@index([requestId])
   @@index([requestId, stepOrder])
+}
+
+model NotificationPreference {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   String // IN_APP | TEAMS | OUTLOOK
+  eventType String // TASK_ASSIGNED | REQUEST_REJECTED | REQUEST_COMPLETED | COMMENT_ADDED
+  enabled   Boolean @default(true)
+
+  @@unique([userId, channel, eventType])
+  @@index([userId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestId String?
+  request   Request?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  channel   String    @default("IN_APP") // IN_APP | TEAMS | OUTLOOK
+  status    String    @default("UNREAD") // IN_APP: UNREAD -> READ; externos: PENDING -> SENT (dispatcher futuro)
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  @@index([userId, status])
 }
 
 model RequestTask {

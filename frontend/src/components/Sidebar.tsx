@@ -1,11 +1,14 @@
 import { NavLink } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { roleLabel } from './StatusBadge';
+import { notificationsApi } from '../services/api';
 import Logo from './Logo';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: '🏠', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/tasks', label: 'Minhas Tarefas', icon: '✅', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
+  { path: '/notifications', label: 'Notificações', icon: '🔔', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/requests', label: 'Solicitações', icon: '📋', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/requests/new', label: 'Nova Solicitação', icon: '➕', roles: ['ADMIN', 'MANAGER', 'FINANCE', 'HR', 'USER'] },
   { path: '/sectors', label: 'Setores', icon: '🏢', roles: ['ADMIN'] },
@@ -18,6 +21,11 @@ const navItems = [
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
+  const { data: unread = 0 } = useQuery({
+    queryKey: ['notif-unread'],
+    queryFn: notificationsApi.unreadCount,
+    refetchInterval: 60000,
+  });
 
   return (
     <div className="flex flex-col w-60 min-h-screen bg-gradient-to-b from-golplus-blue to-golplus-blue-800">
@@ -45,6 +53,9 @@ export default function Sidebar() {
             >
               <span>{item.icon}</span>
               <span>{item.label}</span>
+              {item.path === '/notifications' && unread > 0 && (
+                <span className="ml-auto bg-golplus-orange text-white text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">{unread > 99 ? '99+' : unread}</span>
+              )}
             </NavLink>
           ))}
       </nav>
