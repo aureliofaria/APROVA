@@ -2,7 +2,10 @@ import axios from 'axios';
 import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse, DashboardReport, Comment, Notification, NotificationPreference } from '../types';
 
 const api = axios.create({
-  baseURL: 'http://localhost:3001/api',
+  // Mesma origem por padrão (`/api`) — funciona em produção atrás de proxy ou
+  // servido pelo próprio backend, e em dev via proxy do Vite. Pode-se
+  // sobrescrever com VITE_API_URL (ex.: backend em host/porta separados).
+  baseURL: import.meta.env.VITE_API_URL || '/api',
 });
 
 api.interceptors.request.use((config) => {
