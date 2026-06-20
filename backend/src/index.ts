@@ -58,5 +58,9 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
 
-app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
+// Só inicia o servidor quando executado diretamente — permite importar `app`
+// em testes (supertest) sem abrir uma porta.
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
+}
 export default app;

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../../lib/prisma';
 import { authenticate, requireRole, AuthRequest } from '../../middleware/auth';
+import { parseCents } from '../../lib/money';
 
 const router = Router();
 
@@ -91,6 +92,8 @@ router.post('/', authenticate, requireRole('ADMIN', 'MANAGER'), async (req: Auth
       warehouseId, departmentId, userId, notes,
     } = req.body;
     if (!itemId) { res.status(400).json({ error: 'itemId é obrigatório' }); return; }
+    const invoice = parseCents(invoiceValueCents);
+    if (!invoice.ok) { res.status(400).json({ error: 'invoiceValueCents inválido' }); return; }
 
     const initialStatus = status || (userId ? 'ATIVO' : 'DISPONIVEL');
 
@@ -107,7 +110,7 @@ router.post('/', authenticate, requireRole('ADMIN', 'MANAGER'), async (req: Auth
           purchaseDate: purchaseDate ? new Date(purchaseDate) : null,
           supplier: supplier || null,
           invoiceNumber: invoiceNumber || null,
-          invoiceValueCents: invoiceValueCents != null ? Math.round(Number(invoiceValueCents)) : null,
+          invoiceValueCents: invoice.value,
           warehouseId: warehouseId || null,
           departmentId: departmentId || null,
           userId: userId || null,
@@ -152,7 +155,11 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'MANAGER'), async (req: Au
     if (purchaseDate !== undefined) data.purchaseDate = purchaseDate ? new Date(purchaseDate) : null;
     if (supplier !== undefined) data.supplier = supplier;
     if (invoiceNumber !== undefined) data.invoiceNumber = invoiceNumber;
-    if (invoiceValueCents !== undefined) data.invoiceValueCents = invoiceValueCents != null ? Math.round(Number(invoiceValueCents)) : null;
+    if (invoiceValueCents !== undefined) {
+      const invoice = parseCents(invoiceValueCents);
+      if (!invoice.ok) { res.status(400).json({ error: 'invoiceValueCents inválido' }); return; }
+      data.invoiceValueCents = invoice.value;
+    }
     if (notes !== undefined) data.notes = notes;
     if (isActive !== undefined) data.isActive = isActive;
 

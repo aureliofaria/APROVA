@@ -6,6 +6,7 @@ import { createRequestTasks, advanceRequest } from '../services/workflow';
 import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
 import { notify, notifyMany } from '../services/notifications';
+import { parseCents } from '../lib/money';
 
 const router = Router();
 
@@ -67,6 +68,8 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
             amountCents, supplier, costCenter, justification, vacancyType, replacementName,
             resourceIds } = req.body;
     if (!flowId || !title) { res.status(400).json({ error: 'Fluxo e título são obrigatórios' }); return; }
+    const amount = parseCents(amountCents);
+    if (!amount.ok) { res.status(400).json({ error: 'Valor (amountCents) inválido' }); return; }
 
     const flow = await prisma.flowTemplate.findUnique({ where: { id: flowId } });
     if (!flow) { res.status(404).json({ error: 'Fluxo não encontrado' }); return; }
@@ -87,7 +90,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         targetEmployee,
         targetDepartment,
         startDate,
-        amountCents: amountCents != null && amountCents !== '' ? Math.round(Number(amountCents)) : null,
+        amountCents: amount.value,
         supplier,
         costCenter,
         justification,
@@ -137,6 +140,8 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { title, description, targetEmployee, targetDepartment, startDate, amountCents, supplier, costCenter, justification } = req.body;
+    const amount = parseCents(amountCents);
+    if (!amount.ok) { res.status(400).json({ error: 'Valor (amountCents) inválido' }); return; }
     const request = await prisma.request.findUnique({ where: { id: req.params.id } });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     if (request.initiatorId !== req.user.id && req.user.role !== 'ADMIN') {
@@ -144,7 +149,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     }
     const updated = await prisma.request.update({
       where: { id: req.params.id },
-      data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: amountCents != null && amountCents !== '' ? Math.round(Number(amountCents)) : undefined, supplier, costCenter, justification },
+      // Só altera o valor quando enviado no corpo; omitido não zera.
+      data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: 'amountCents' in req.body ? amount.value : undefined, supplier, costCenter, justification },
     });
     res.json(updated);
   } catch {
@@ -266,36 +272,24 @@ router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response)
     const authz = authorizeDecision(request, req.user);
     if (!authz.ok) { res.status(authz.status).json({ error: authz.error }); return; }
 
+    // Tudo numa transação: registro da decisão, mudança de status, auditoria e
+    // notificação são atômicos — falha no meio não deixa estado inconsistente.
     try {
-      await prisma.approval.create({
-        data: {
-          requestId: req.params.id,
-          approverId: req.user.id,
-          stepOrder: request.currentStep,
-          decision: 'REJECTED',
-          comments,
-        },
+      await prisma.$transaction(async (tx) => {
+        await tx.approval.create({
+          data: { requestId: req.params.id, approverId: req.user.id, stepOrder: request.currentStep, decision: 'REJECTED', comments },
+        });
+        await tx.request.update({ where: { id: req.params.id }, data: { status: 'REJECTED' } });
+        await tx.auditLog.create({
+          data: { requestId: req.params.id, userId: req.user.id, userName: req.user.name, action: 'REJECTED', details: `Rejeitado: ${comments}` },
+        });
+        if (request.initiatorId !== req.user.id) {
+          await notify(tx, { userId: request.initiatorId, type: 'REQUEST_REJECTED', title: 'Solicitação rejeitada', body: `Sua solicitação "${request.title}" foi rejeitada: ${comments}`, requestId: req.params.id });
+        }
       });
     } catch (e: any) {
       if (e?.code === 'P2002') { res.status(409).json({ error: 'Você já decidiu esta etapa' }); return; }
       throw e;
-    }
-
-    await prisma.request.update({ where: { id: req.params.id }, data: { status: 'REJECTED' } });
-
-    await prisma.auditLog.create({
-      data: {
-        requestId: req.params.id,
-        userId: req.user.id,
-        userName: req.user.name,
-        action: 'REJECTED',
-        details: comments ? `Rejeitado: ${comments}` : 'Rejeitado',
-      },
-    });
-
-    // Notifica o solicitante sobre a recusa (com o motivo).
-    if (request.initiatorId !== req.user.id) {
-      await notify(prisma, { userId: request.initiatorId, type: 'REQUEST_REJECTED', title: 'Solicitação rejeitada', body: `Sua solicitação "${request.title}" foi rejeitada: ${comments}`, requestId: req.params.id });
     }
 
     res.json({ message: 'Solicitação rejeitada' });
@@ -376,38 +370,47 @@ router.post('/:id/resources/:resourceId/asset', authenticate, async (req: AuthRe
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
 
-    // Só ADMIN ou quem tem tarefa nesta solicitação (o responsável pelo atendimento) pode vincular.
+    // Só ADMIN ou quem tem uma tarefa EM ABERTO nesta solicitação (responsável
+    // atual pelo atendimento) pode vincular — tarefa já concluída não dá acesso.
     if (req.user.role !== 'ADMIN') {
-      const hasTask = await prisma.requestTask.count({ where: { requestId: request.id, assigneeId: req.user.id } });
-      if (hasTask === 0) { res.status(403).json({ error: 'Acesso negado' }); return; }
+      const hasOpenTask = await prisma.requestTask.count({ where: { requestId: request.id, assigneeId: req.user.id, status: 'PENDING' } });
+      if (hasOpenTask === 0) { res.status(403).json({ error: 'Acesso negado' }); return; }
     }
 
     const rr = await prisma.requestResource.findFirst({ where: { id: req.params.resourceId, requestId: request.id }, include: { asset: true } });
     if (!rr) { res.status(404).json({ error: 'Recurso da solicitação não encontrado' }); return; }
 
     const allocates = request.flow.type === 'ONBOARDING' || request.flow.type === 'PURCHASE';
+    // Unidade anteriormente reservada por esta linha, a liberar em desvínculo OU
+    // em troca de unidade (antes a liberação só ocorria no desvínculo, deixando o
+    // ativo anterior preso em RESERVADO).
+    const oldAssetId = rr.assetId && rr.assetId !== assetId ? rr.assetId : null;
 
-    // Desvínculo: libera a unidade que estava reservada por esta linha.
+    // Desvínculo.
     if (!assetId) {
-      if (rr.assetId && rr.asset?.status === 'RESERVADO') {
-        await prisma.asset.update({ where: { id: rr.assetId }, data: { status: 'DISPONIVEL' } });
-      }
-      const updated = await prisma.requestResource.update({ where: { id: rr.id }, data: { assetId: null } });
-      res.json(updated); return;
+      await prisma.$transaction(async (tx) => {
+        if (rr.assetId) await tx.asset.updateMany({ where: { id: rr.assetId, status: 'RESERVADO' }, data: { status: 'DISPONIVEL' } });
+        await tx.requestResource.update({ where: { id: rr.id }, data: { assetId: null } });
+      });
+      res.json({ ok: true }); return;
     }
 
     const asset = await prisma.asset.findUnique({ where: { id: assetId } });
     if (!asset || !asset.isActive) { res.status(400).json({ error: 'Ativo inválido' }); return; }
 
     if (allocates) {
-      // Para alocar (admissão/compra), a unidade precisa estar disponível; é reservada.
-      if (asset.status !== 'DISPONIVEL') { res.status(409).json({ error: 'Ativo não está disponível para alocação' }); return; }
-      await prisma.asset.update({ where: { id: assetId }, data: { status: 'RESERVADO' } });
+      // Reserva ATÔMICA: só reserva se ainda estiver DISPONIVEL (evita corrida /
+      // dupla reserva entre requisições concorrentes).
+      const reserved = await prisma.asset.updateMany({ where: { id: assetId, status: 'DISPONIVEL' }, data: { status: 'RESERVADO' } });
+      if (reserved.count === 0) { res.status(409).json({ error: 'Ativo não está disponível para alocação' }); return; }
     }
     // Para desligamento, vincula-se a unidade em uso, sem alterar o status agora
     // (a devolução acontece na conclusão do fluxo).
 
-    const updated = await prisma.requestResource.update({ where: { id: rr.id }, data: { assetId } });
+    const updated = await prisma.$transaction(async (tx) => {
+      if (oldAssetId) await tx.asset.updateMany({ where: { id: oldAssetId, status: 'RESERVADO' }, data: { status: 'DISPONIVEL' } });
+      return tx.requestResource.update({ where: { id: rr.id }, data: { assetId } });
+    });
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Erro ao vincular ativo ao recurso' });

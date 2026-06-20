@@ -132,15 +132,18 @@ function CreateAssetModal({ qc, onClose }: { qc: any; onClose: () => void }) {
   const [form, setForm] = useState({ itemId: '', tag: '', serialNumber: '', supplier: '', invoiceValue: '', warehouseId: '', condition: 'NOVO' });
 
   const create = useMutation({
-    mutationFn: () => inventoryApi.createAsset({
-      itemId: form.itemId,
-      tag: form.tag || undefined,
-      serialNumber: form.serialNumber || undefined,
-      supplier: form.supplier || undefined,
-      invoiceValueCents: form.invoiceValue ? Math.round(parseFloat(form.invoiceValue) * 100) : undefined,
-      warehouseId: form.warehouseId || undefined,
-      condition: form.condition as Asset['condition'],
-    }),
+    mutationFn: () => {
+      const reais = form.invoiceValue ? parseFloat(form.invoiceValue) : NaN;
+      return inventoryApi.createAsset({
+        itemId: form.itemId,
+        tag: form.tag || undefined,
+        serialNumber: form.serialNumber || undefined,
+        supplier: form.supplier || undefined,
+        invoiceValueCents: Number.isFinite(reais) ? Math.round(reais * 100) : undefined,
+        warehouseId: form.warehouseId || undefined,
+        condition: form.condition as Asset['condition'],
+      });
+    },
     onSuccess: () => { toast.success('Ativo cadastrado!'); qc.invalidateQueries({ queryKey: ['assets'] }); onClose(); },
     onError: () => toast.error('Erro ao cadastrar ativo'),
   });
