@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { parseCents } from '../lib/money';
 
 const router = Router();
 
@@ -147,12 +148,15 @@ router.delete('/:id/steps/:stepId', authenticate, requireRole('ADMIN'), async (r
 router.post('/:flowId/steps/:stepId/auth-levels', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
     const { name, minValueCents, maxValueCents, requiredApprovers, approverRole, deadlineHours } = req.body;
+    const min = parseCents(minValueCents);
+    const max = parseCents(maxValueCents);
+    if (!min.ok || !max.ok) { res.status(400).json({ error: 'Valor de alçada inválido' }); return; }
     const level = await prisma.authorizationLevel.create({
       data: {
         flowStepId: req.params.stepId,
         name,
-        minValueCents: minValueCents != null ? Math.round(Number(minValueCents)) : null,
-        maxValueCents: maxValueCents != null ? Math.round(Number(maxValueCents)) : null,
+        minValueCents: min.value,
+        maxValueCents: max.value,
         requiredApprovers: requiredApprovers ?? 1,
         approverRole,
         deadlineHours,
@@ -167,17 +171,20 @@ router.post('/:flowId/steps/:stepId/auth-levels', authenticate, requireRole('ADM
 router.put('/:flowId/steps/:stepId/auth-levels/:levelId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
     const { name, minValueCents, maxValueCents, requiredApprovers, approverRole, deadlineHours } = req.body;
-    const level = await prisma.authorizationLevel.update({
-      where: { id: req.params.levelId },
-      data: {
-        name,
-        minValueCents: minValueCents != null ? Math.round(Number(minValueCents)) : null,
-        maxValueCents: maxValueCents != null ? Math.round(Number(maxValueCents)) : null,
-        requiredApprovers,
-        approverRole,
-        deadlineHours,
-      },
-    });
+    // Atualização parcial: só altera as faixas se vierem no corpo — campos
+    // omitidos NÃO devem zerar a alçada configurada (Prisma ignora `undefined`).
+    const data: Record<string, unknown> = { name, requiredApprovers, approverRole, deadlineHours };
+    if ('minValueCents' in req.body) {
+      const min = parseCents(minValueCents);
+      if (!min.ok) { res.status(400).json({ error: 'minValueCents inválido' }); return; }
+      data.minValueCents = min.value;
+    }
+    if ('maxValueCents' in req.body) {
+      const max = parseCents(maxValueCents);
+      if (!max.ok) { res.status(400).json({ error: 'maxValueCents inválido' }); return; }
+      data.maxValueCents = max.value;
+    }
+    const level = await prisma.authorizationLevel.update({ where: { id: req.params.levelId }, data });
     res.json(level);
   } catch {
     res.status(500).json({ error: 'Erro ao atualizar nível de autorização' });

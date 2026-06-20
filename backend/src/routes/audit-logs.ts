@@ -23,7 +23,12 @@ function buildWhere(query: ExpressRequest['query']): Prisma.AuditLogWhereInput {
   }
   if (typeof query.to === 'string' && query.to) {
     const to = new Date(query.to);
-    if (!isNaN(to.getTime())) createdAt.lte = to;
+    if (!isNaN(to.getTime())) {
+      // Data sem componente de hora (YYYY-MM-DD) → inclui o dia inteiro,
+      // senão registros do próprio dia de `to` ficariam de fora (lte = meia-noite).
+      if (!query.to.includes('T')) to.setUTCHours(23, 59, 59, 999);
+      createdAt.lte = to;
+    }
   }
   if (createdAt.gte || createdAt.lte) where.createdAt = createdAt;
 

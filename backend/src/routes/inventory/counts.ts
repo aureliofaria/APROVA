@@ -205,40 +205,41 @@ router.put('/:id/items/:itemId', authenticate, async (req: AuthRequest, res: Res
   }
 });
 
-// POST /api/inventory/counts/:id/start — inicia a contagem
+// Transição de status guardada: só aplica se a contagem existir e estiver num
+// status de origem permitido (evita reabrir/recompletar uma contagem encerrada).
+async function transitionCount(
+  res: Response,
+  id: string,
+  allowedFrom: string[],
+  data: Record<string, unknown>,
+  errMsg: string,
+) {
+  const current = await prisma.inventoryCount.findUnique({ where: { id }, select: { status: true } });
+  if (!current) { res.status(404).json({ error: 'Contagem não encontrada' }); return; }
+  if (!allowedFrom.includes(current.status)) {
+    res.status(409).json({ error: `Transição inválida a partir de ${current.status}` }); return;
+  }
+  try {
+    const count = await prisma.inventoryCount.update({ where: { id }, data });
+    res.json(count);
+  } catch {
+    res.status(500).json({ error: errMsg });
+  }
+}
+
+// POST /api/inventory/counts/:id/start — RASCUNHO -> EM_ANDAMENTO
 router.post('/:id/start', authenticate, requireRole('ADMIN', 'MANAGER'), async (req: AuthRequest, res: Response) => {
-  try {
-    const count = await prisma.inventoryCount.update({ where: { id: req.params.id }, data: { status: 'EM_ANDAMENTO' } });
-    res.json(count);
-  } catch (e: any) {
-    if (e?.code === 'P2025') { res.status(404).json({ error: 'Contagem não encontrada' }); return; }
-    res.status(500).json({ error: 'Erro ao iniciar contagem' });
-  }
+  await transitionCount(res, req.params.id, ['RASCUNHO'], { status: 'EM_ANDAMENTO' }, 'Erro ao iniciar contagem');
 });
 
-// POST /api/inventory/counts/:id/complete — conclui a contagem
+// POST /api/inventory/counts/:id/complete — EM_ANDAMENTO -> CONCLUIDA
 router.post('/:id/complete', authenticate, requireRole('ADMIN', 'MANAGER'), async (req: AuthRequest, res: Response) => {
-  try {
-    const count = await prisma.inventoryCount.update({
-      where: { id: req.params.id },
-      data: { status: 'CONCLUIDA', completedAt: new Date() },
-    });
-    res.json(count);
-  } catch (e: any) {
-    if (e?.code === 'P2025') { res.status(404).json({ error: 'Contagem não encontrada' }); return; }
-    res.status(500).json({ error: 'Erro ao concluir contagem' });
-  }
+  await transitionCount(res, req.params.id, ['EM_ANDAMENTO'], { status: 'CONCLUIDA', completedAt: new Date() }, 'Erro ao concluir contagem');
 });
 
-// POST /api/inventory/counts/:id/cancel — cancela a contagem
+// POST /api/inventory/counts/:id/cancel — só se ainda não concluída/cancelada
 router.post('/:id/cancel', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
-  try {
-    const count = await prisma.inventoryCount.update({ where: { id: req.params.id }, data: { status: 'CANCELADA' } });
-    res.json(count);
-  } catch (e: any) {
-    if (e?.code === 'P2025') { res.status(404).json({ error: 'Contagem não encontrada' }); return; }
-    res.status(500).json({ error: 'Erro ao cancelar contagem' });
-  }
+  await transitionCount(res, req.params.id, ['RASCUNHO', 'EM_ANDAMENTO'], { status: 'CANCELADA' }, 'Erro ao cancelar contagem');
 });
 
 export default router;

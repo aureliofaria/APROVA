@@ -1,4 +1,11 @@
+import jwt from 'jsonwebtoken';
 import prisma from '../src/lib/prisma';
+import { config } from '../src/config';
+
+// Forja um token válido para o usuário (mesmo payload do /auth/login: { userId }).
+export function tokenFor(userId: string): string {
+  return jwt.sign({ userId }, config.jwtSecret);
+}
 
 // Limpa todas as tabelas respeitando as dependências de chave estrangeira.
 export async function resetDb() {

@@ -34,7 +34,13 @@ function ResourceRow({ requestId, requestType, resource }: { requestId: string; 
 
   const link = useMutation({
     mutationFn: (assetId: string | null) => requestsApi.linkAsset(requestId, resource.id, assetId),
-    onSuccess: () => { toast.success('Inventário atualizado!'); qc.invalidateQueries({ queryKey: ['request', requestId] }); setPicking(false); },
+    onSuccess: () => {
+      toast.success('Inventário atualizado!');
+      qc.invalidateQueries({ queryKey: ['request', requestId] });
+      qc.invalidateQueries({ queryKey: ['link-assets'] }); // listas de ativos disponíveis para vínculo
+      qc.invalidateQueries({ queryKey: ['assets'] });       // página de inventário
+      setPicking(false);
+    },
     onError: () => toast.error('Não foi possível vincular o ativo'),
   });
 
