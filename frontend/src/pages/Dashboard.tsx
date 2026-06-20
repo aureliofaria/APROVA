@@ -1,14 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { requestsApi, tasksApi } from '../services/api';
+import { requestsApi, tasksApi, reportsApi } from '../services/api';
 import { StatusBadge, FlowTypeBadge } from '../components/StatusBadge';
 import Header from '../components/Header';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const canSeeReports = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const { data: requests = [] } = useQuery({ queryKey: ['requests'], queryFn: () => requestsApi.getAll() });
   const { data: tasks = [] } = useQuery({ queryKey: ['myTasks'], queryFn: () => tasksApi.getMy() });
+  const { data: report } = useQuery({ queryKey: ['reportDashboard'], queryFn: () => reportsApi.dashboard(), enabled: canSeeReports });
 
   const stats = {
     total: requests.length,
@@ -41,6 +43,50 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* SLA / Relatórios (gestão) */}
+      {canSeeReports && report && (
+        <div className="mb-8">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">Indicadores de SLA <span className="text-gray-400 font-normal">· últimos 30 dias</span></h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-2xl font-bold text-green-600">{report.sla.complianceRate != null ? `${report.sla.complianceRate}%` : '—'}</div>
+              <div className="text-sm text-gray-500 mt-1">Conformidade de prazo</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-2xl font-bold text-red-600">{report.sla.overduePending}</div>
+              <div className="text-sm text-gray-500 mt-1">Tarefas vencidas em aberto</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-2xl font-bold text-golplus-blue-700">{report.sla.avgCompletionHours != null ? `${report.sla.avgCompletionHours}h` : '—'}</div>
+              <div className="text-sm text-gray-500 mt-1">Tempo médio de conclusão</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <div className="text-2xl font-bold text-gray-900">{report.totals.completed}</div>
+              <div className="text-sm text-gray-500 mt-1">Concluídas no período</div>
+            </div>
+          </div>
+          {report.byFlowType.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Volume por tipo de fluxo</h3>
+              <div className="space-y-2">
+                {report.byFlowType.map((f) => {
+                  const max = Math.max(...report.byFlowType.map((x) => x.count));
+                  return (
+                    <div key={f.type} className="flex items-center gap-3">
+                      <span className="w-40 flex-shrink-0"><FlowTypeBadge type={f.type} /></span>
+                      <div className="flex-1 bg-gray-100 rounded-full h-2.5">
+                        <div className="bg-golplus-blue-500 h-2.5 rounded-full" style={{ width: `${max ? (f.count / max) * 100 : 0}%` }} />
+                      </div>
+                      <span className="text-sm text-gray-600 w-8 text-right">{f.count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Requests */}

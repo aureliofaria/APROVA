@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse } from '../types';
+import type { User, Department, Sector, SectorMember, FlowTemplate, Request, RequestTask, Attachment, AuditLog, ResourceItem, InventoryItem, Asset, AssetMovement, Warehouse, DashboardReport } from '../types';
 
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
@@ -149,6 +149,12 @@ export const resourcesApi = {
   update: (id: string, data: Partial<ResourceItem>) =>
     api.put<ResourceItem>(`/resources/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/resources/${id}`).then(r => r.data),
+};
+
+// Relatórios / SLA (somente ADMIN/MANAGER)
+export const reportsApi = {
+  dashboard: (params?: { from?: string; to?: string; flowType?: string }) =>
+    api.get<DashboardReport>('/reports/dashboard', { params }).then(r => r.data),
 };
 
 // Inventário patrimonial

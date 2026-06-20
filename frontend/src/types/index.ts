@@ -128,6 +128,23 @@ export interface Asset {
   movements?: AssetMovement[];
 }
 
+export interface DashboardReport {
+  range: { from: string; to: string };
+  totals: { requests: number; open: number; completed: number; rejected: number };
+  statusCounts: Record<string, number>;
+  byFlowType: { type: string; name: string; count: number }[];
+  sla: {
+    onTime: number;
+    late: number;
+    overduePending: number;
+    pendingOnTrack: number;
+    noSla: number;
+    complianceRate: number | null;
+    avgCompletionHours: number | null;
+  };
+  throughput: { date: string; created: number; completed: number }[];
+}
+
 export interface AssetMovement {
   id: string;
   assetId: string;
