@@ -58,6 +58,18 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
 
+// Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
+// próprio backend serve o build do frontend, deixando tudo na MESMA origem
+// (http://<ip>:porta) — sem necessidade de nginx. Mantém /api e /uploads
+// intactos (já registrados acima) e faz fallback de SPA para as demais rotas.
+if (process.env.SERVE_FRONTEND === 'true') {
+  const frontendDist = path.resolve(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDist));
+  app.get(/^\/(?!api\/|uploads\/).*/, (_req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
+
 // Só inicia o servidor quando executado diretamente — permite importar `app`
 // em testes (supertest) sem abrir uma porta.
 if (require.main === module) {
