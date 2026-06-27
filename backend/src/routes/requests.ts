@@ -17,6 +17,21 @@ const router = Router();
 // listagem GET /, que já expõe todas as solicitações a esses papéis.
 const WIDE_VIEW_ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'];
 
+// Escopo de VISIBILIDADE da listagem de solicitações por hierarquia/setor.
+// Regras atuais (governança confirmada):
+//  - Membro (USER e demais papéis não-amplos): vê SÓ os próprios pedidos.
+//  - Papéis de visão ampla (ADMIN/MANAGER/FINANCE/HR): veem todos.
+//
+// GANCHO (pendente de confirmação humana — NÃO hardcodar contra):
+//  A regra "Líder de setor vê os pedidos do SEU setor" entra aqui, sem tocar
+//  nas rotas: quando houver um papel/atributo de liderança de setor, retornar
+//  `{ OR: [{ initiatorId: user.id }, { sectorId: { in: user.ledSectorIds } }] }`.
+//  Centralizar aqui garante uma única fonte de verdade para a visibilidade.
+export function buildVisibilityScope(user: { id: string; role: string }): Record<string, unknown> {
+  if (WIDE_VIEW_ROLES.includes(user.role)) return {};
+  return { initiatorId: user.id };
+}
+
 async function canAccessRequest(
   user: { id: string; role: string },
   requestId: string,
@@ -42,11 +57,8 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { status, type, search } = req.query as any;
     const user = req.user;
-    const where: any = {};
+    const where: any = buildVisibilityScope(user);
 
-    if (user.role !== 'ADMIN' && user.role !== 'MANAGER' && user.role !== 'FINANCE' && user.role !== 'HR') {
-      where.initiatorId = user.id;
-    }
     if (status) where.status = status;
     if (type) where.flow = { type };
     if (search) where.title = { contains: search };

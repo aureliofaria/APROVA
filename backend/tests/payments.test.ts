@@ -226,6 +226,33 @@ describe('pagamentos — IDOR', () => {
   });
 });
 
+describe('pagamentos — visibilidade por papel (escopo de listagem)', () => {
+  beforeEach(resetDb);
+
+  it('Membro (USER) só lista os próprios pedidos; não vê os de terceiros', async () => {
+    const a = await makeUser('USER');
+    const b = await makeUser('USER');
+    const flow = await makePaymentFlow();
+    await request(app).post('/api/requests').set(auth(tokenFor(a.id))).send(validPayment(flow.id, { title: 'de-A' }));
+    await request(app).post('/api/requests').set(auth(tokenFor(b.id))).send(validPayment(flow.id, { title: 'de-B' }));
+
+    const listA = await request(app).get('/api/requests').set(auth(tokenFor(a.id)));
+    expect(listA.status).toBe(200);
+    expect(listA.body.every((r: any) => r.initiator.id === a.id)).toBe(true);
+    expect(listA.body.some((r: any) => r.title === 'de-B')).toBe(false);
+  });
+
+  it('papel de visão ampla (FINANCE) lista pedidos de todos', async () => {
+    const a = await makeUser('USER');
+    const fin = await makeUser('FINANCE');
+    const flow = await makePaymentFlow();
+    await request(app).post('/api/requests').set(auth(tokenFor(a.id))).send(validPayment(flow.id, { title: 'de-A' }));
+    const list = await request(app).get('/api/requests').set(auth(tokenFor(fin.id)));
+    expect(list.status).toBe(200);
+    expect(list.body.some((r: any) => r.title === 'de-A')).toBe(true);
+  });
+});
+
 describe('pagamentos — autenticação obrigatória', () => {
   beforeEach(resetDb);
 
