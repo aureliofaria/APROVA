@@ -74,7 +74,18 @@ model SectorMember {
   sector    Sector   @relation(fields: [sectorId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String // LIDER, PROTETOR
+  role      String // legado: LIDER, PROTETOR (mantido p/ compat; ver `level`)
+  // Fase 0 — hierarquia: LIDER_1 (1 por setor, obrigatório/único), LIDER_2 (0..n), MEMBRO (0..n).
+  level     String   @default("MEMBRO")
+  // Membro reporta a um LIDER_2 ou direto ao LIDER_1 (apreciação do pedido).
+  reportsToId String?
+  reportsTo   SectorMember?  @relation("MemberReports", fields: [reportsToId], references: [id], onDelete: SetNull)
+  reports     SectorMember[] @relation("MemberReports")
+  // Suplência: LIDER_1 delega a um LIDER_2 por um período (evita travar o setor).
+  delegateToId  String?
+  delegateTo    SectorMember?  @relation("MemberDelegate", fields: [delegateToId], references: [id], onDelete: SetNull)
+  delegatedFrom SectorMember[] @relation("MemberDelegate")
+  delegateUntil DateTime?
   createdAt DateTime @default(now())
 
   @@unique([sectorId, userId, role])

@@ -1,8 +1,22 @@
 import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { SECTOR_LEVELS } from '../lib/org';
 
 const router = Router();
+
+// Mapeia o nível hierárquico (Fase 0) para o papel legado (LIDER/PROTETOR),
+// mantido por compatibilidade (escalonamento de SLA, frontend atual).
+const levelToRole = (level: string) => (level === 'MEMBRO' ? 'PROTETOR' : 'LIDER');
+const roleToLevel = (role: string) => (role === 'LIDER' ? 'LIDER_1' : 'MEMBRO');
+
+// Resolve o nível a partir de { level } (preferido) ou { role } (legado).
+// Retorna null se inválido.
+function resolveLevel(rawLevel?: string, role?: string): string | null {
+  if (rawLevel) return (SECTOR_LEVELS as readonly string[]).includes(rawLevel) ? rawLevel : null;
+  if (role) return ['LIDER', 'PROTETOR'].includes(role) ? roleToLevel(role) : null;
+  return null;
+}
 
 // Lista setores — ADMIN vê todos; demais veem apenas onde são membros
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
@@ -95,19 +109,28 @@ router.delete('/:id', authenticate, requireRole('ADMIN'), async (req: AuthReques
   }
 });
 
-// Adicionar membro (LIDER ou PROTETOR)
+// Adicionar/atualizar membro. Aceita { level } (LIDER_1|LIDER_2|MEMBRO) — ou o
+// { role } legado (LIDER|PROTETOR) — e, opcionalmente, reportsToId (a quem o
+// Membro reporta: um LIDER_2 ou o LIDER_1). Invariante: 1 LIDER_1 por setor.
 router.post('/:id/members', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { userId, role } = req.body;
-    if (!userId || !role) { res.status(400).json({ error: 'userId e role são obrigatórios' }); return; }
-    if (!['LIDER', 'PROTETOR'].includes(role)) { res.status(400).json({ error: 'role deve ser LIDER ou PROTETOR' }); return; }
+    const { userId, role, level: rawLevel, reportsToId } = req.body;
+    if (!userId) { res.status(400).json({ error: 'userId é obrigatório' }); return; }
+    const level = resolveLevel(rawLevel, role);
+    if (!level) { res.status(400).json({ error: 'Informe level (LIDER_1|LIDER_2|MEMBRO) ou role (LIDER|PROTETOR) válido' }); return; }
 
-    const member = await prisma.sectorMember.upsert({
-      where: { sectorId_userId_role: { sectorId: req.params.id, userId, role } },
-      update: {},
-      create: { sectorId: req.params.id, userId, role },
-      include: { user: { select: { id: true, name: true, email: true, role: true } } },
-    });
+    // Invariante: no máximo 1 LIDER_1 por setor.
+    if (level === 'LIDER_1') {
+      const other = await prisma.sectorMember.findFirst({ where: { sectorId: req.params.id, level: 'LIDER_1', userId: { not: userId } } });
+      if (other) { res.status(409).json({ error: 'Este setor já possui um Líder I' }); return; }
+    }
+
+    const include = { user: { select: { id: true, name: true, email: true, role: true } } };
+    const data = { role: levelToRole(level), level, reportsToId: reportsToId ?? null };
+    const existing = await prisma.sectorMember.findFirst({ where: { sectorId: req.params.id, userId } });
+    const member = existing
+      ? await prisma.sectorMember.update({ where: { id: existing.id }, data, include })
+      : await prisma.sectorMember.create({ data: { sectorId: req.params.id, userId, ...data }, include });
     res.status(201).json(member);
   } catch {
     res.status(500).json({ error: 'Erro ao adicionar membro' });
@@ -127,11 +150,23 @@ router.delete('/:id/members/:memberId', authenticate, requireRole('ADMIN'), asyn
 // Alterar papel do membro
 router.put('/:id/members/:memberId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
-    const { role } = req.body;
-    if (!['LIDER', 'PROTETOR'].includes(role)) { res.status(400).json({ error: 'role deve ser LIDER ou PROTETOR' }); return; }
+    const { role, level: rawLevel, reportsToId } = req.body;
+    const current = await prisma.sectorMember.findUnique({ where: { id: req.params.memberId } });
+    if (!current) { res.status(404).json({ error: 'Membro não encontrado' }); return; }
+    const level = resolveLevel(rawLevel, role) ?? current.level;
+    if (rawLevel || role) {
+      if (!resolveLevel(rawLevel, role)) { res.status(400).json({ error: 'level/role inválido' }); return; }
+    }
+    // Invariante: 1 LIDER_1 por setor.
+    if (level === 'LIDER_1') {
+      const other = await prisma.sectorMember.findFirst({ where: { sectorId: current.sectorId, level: 'LIDER_1', id: { not: current.id } } });
+      if (other) { res.status(409).json({ error: 'Este setor já possui um Líder I' }); return; }
+    }
+    const data: any = { level, role: levelToRole(level) };
+    if (reportsToId !== undefined) data.reportsToId = reportsToId;
     const member = await prisma.sectorMember.update({
       where: { id: req.params.memberId },
-      data: { role },
+      data,
       include: { user: { select: { id: true, name: true, email: true, role: true } } },
     });
     res.json(member);
