@@ -52,6 +52,37 @@ export function validatePaymentAmount(amountCents: number | null | undefined): s
   return null;
 }
 
+// ===========================================================================
+// GANCHO FinanceParams (NÃO implementado aqui — propriedade da Fase 0).
+//
+// Regra de negócio confirmada para wiring futuro (deixada como contrato/seam):
+//  - TETO mensal por setor: cadastro manual (ADMIN/Diretoria/Líder I do Financeiro).
+//  - CONSUMIDO/SALDO: calculado automaticamente (teto − soma de pagamentos
+//    DEFERIDOS do setor no mês), COM override manual auditado.
+//  - Roteamento: dentro do teto+previsão+saldo → Membro do Financeiro;
+//    senão → Líder I → Diretoria.
+//
+// Este módulo NÃO define o modelo de setores/hierarquia/parâmetros (Fase 0).
+// O roteamento de aprovação deve apenas CHAMAR este gancho quando ele existir.
+// A implementação default é nula (sem efeito), preservando o comportamento
+// atual (alçada por valor).
+export interface FinanceRoutingContext {
+  sectorId?: string | null;
+  amountCents: number;
+  at?: Date; // referência temporal para o cálculo mensal (default: agora)
+}
+
+export interface FinanceRoutingDecision {
+  withinBudget: boolean; // true → rota "Membro do Financeiro"
+  escalation: string[];  // ex.: ['LIDER_I','DIRETORIA'] quando estoura o teto
+}
+
+// Default: sem FinanceParams configurado → não interfere (retorna null).
+// A Fase 0 substitui/injeta uma implementação que consulte teto/saldo do setor.
+export function resolveFinanceRouting(_ctx: FinanceRoutingContext): FinanceRoutingDecision | null {
+  return null;
+}
+
 interface PaymentFields {
   paymentCategory?: unknown;
   amountCents?: number | null;
