@@ -8,8 +8,48 @@ import { APPROVER_ROLES } from '../config';
 import { notify, notifyMany } from '../services/notifications';
 import { parseCents } from '../lib/money';
 import { buildRequestWhere, canViewRequest } from '../lib/visibility';
+import {
+  SensitiveType,
+  resolveViewerSensitiveAccess,
+  maskFields,
+  recordSensitiveAccess,
+} from '../lib/fieldMasking';
 
 const router = Router();
+
+// ===== Mascaramento de campos sensíveis (LGPD) — Fase 0 · Passo 4 ===========
+// Registro dos campos sensíveis de PRIMEIRA CLASSE da Request (colunas reais).
+// VAZIO hoje: o schema atual não possui coluna estruturada de PII. Os valores
+// sensíveis de formulário virão como campos dinâmicos no Passo 7 (FormField
+// com flag de sensibilidade) e alimentarão o mascaramento por ali. Este
+// registro cobre eventuais colunas futuras de 1ª classe — a costura já fica
+// pronta e auditada, sendo hoje um no-op verificável em linhas reais.
+const REQUEST_SENSITIVE_FIELDS: Partial<Record<string, SensitiveType>> = {};
+
+// Função interna testável: aplica o mascaramento de um registro dado um
+// registro de campos sensíveis e o conjunto de tipos liberados, devolvendo a
+// cópia mascarada e a lista de campos revelados (para auditoria).
+export function applyMaskWithRegistry<T extends Record<string, any>>(
+  record: T,
+  registry: Partial<Record<string, SensitiveType>>,
+  allowed: Set<SensitiveType>
+) {
+  return maskFields(record, registry as Partial<Record<keyof T, SensitiveType>>, allowed);
+}
+
+// Serializa uma Request para o espectador: resolve os tipos liberados, mascara
+// os campos sensíveis registrados, audita o que foi revelado e devolve a cópia
+// mascarada. Com o registro vazio é um no-op (não muta, não audita).
+export async function maskRequestForViewer<T extends { id: string }>(
+  user: { id: string; name?: string | null; role?: string | null },
+  request: T,
+  db = prisma
+): Promise<T> {
+  const allowed = await resolveViewerSensitiveAccess(user, db);
+  const { masked, revealed } = applyMaskWithRegistry(request, REQUEST_SENSITIVE_FIELDS, allowed);
+  await recordSensitiveAccess(db, { user, requestId: request.id, revealed });
+  return masked;
+}
 
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -57,7 +97,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     if (!(await canViewRequest(req.user, request))) { res.status(403).json({ error: 'Acesso negado' }); return; }
-    res.json(request);
+    res.json(await maskRequestForViewer(req.user, request));
   } catch {
     res.status(500).json({ error: 'Erro ao buscar solicitação' });
   }
