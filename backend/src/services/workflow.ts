@@ -83,17 +83,22 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       });
       // Sem fallback: etapa de alçada não pode ser atribuída ao iniciador.
     } else {
-      if (step.requiredRole) {
+      const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true, role: true } });
+      // Etapa operacional cujo papel exigido é o do PRÓPRIO iniciador (ou sem
+      // papel definido) é a "tarefa do solicitante": atribuída SOMENTE a ele.
+      // Evita o broadcast a todos os usuários do mesmo papel (ex.: USER), que
+      // vazaria envolvimento/visibilidade a terceiros (IDOR) e fere a regra de
+      // "membro vê só os próprios pedidos".
+      const isOwnStep = step.requiredRole == null || initiator?.role === step.requiredRole;
+      if (isOwnStep) {
+        if (initiator) assignees = [{ id: initiator.id, name: initiator.name }];
+      } else {
         assignees = await db.user.findMany({
           where: { role: step.requiredRole, isActive: true, id: { not: request.initiatorId } },
           select: { id: true, name: true },
         });
-      }
-      if (assignees.length === 0) {
-        // Etapa operacional (não-decisória): fallback ao iniciador para não
-        // travar o fluxo (ex.: etapa de "Solicitação" do próprio autor).
-        const initiator = await db.user.findUnique({ where: { id: request.initiatorId }, select: { id: true, name: true } });
-        if (initiator) assignees = [initiator];
+        // Sem responsável do papel: fallback ao iniciador para não travar o fluxo.
+        if (assignees.length === 0 && initiator) assignees = [{ id: initiator.id, name: initiator.name }];
       }
     }
 

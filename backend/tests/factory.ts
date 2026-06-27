@@ -26,6 +26,7 @@ export async function resetDb() {
   await prisma.requestTask.deleteMany();
   await prisma.requestResource.deleteMany();
   await prisma.request.deleteMany();
+  await prisma.paymentRecurrence.deleteMany();
   await prisma.authorizationLevel.deleteMany();
   await prisma.flowStep.deleteMany();
   await prisma.flowTemplate.deleteMany();
