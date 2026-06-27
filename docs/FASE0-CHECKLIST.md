@@ -6,7 +6,7 @@ Ordem de implementação (cada item = um passo verificável, com build+testes ve
 
 - [x] **1. Papéis & Setores (sem migration)** — constantes canônicas dos papéis (TI, DADOS, SISTEMAS, ADMINISTRATIVO, DIRETORIA + ADMIN/HR/FINANCE/MANAGER/USER) e dos 20 setores; validação no cadastro de usuário/setor. *(User.role já é string — não exige migration.)*
 - [x] **2. Hierarquia de setor (migration)** — `SectorMember.level` ∈ {LIDER_1, LIDER_2, MEMBRO}, `reportsToMemberId`, `delegateToMemberId` + `delegateUntil`. Invariante: **exatamente 1 LIDER_1 por setor** (constraint + validação na API + guarda na tela).
-- [ ] **3. Visibilidade por setor/hierarquia** — `buildVisibilityScope`: Membro só os próprios; Líder II próprios + dos seus Membros; Líder I tudo do setor; Diretoria/ADMIN tudo. Substitui o filtro de papel coarse e **remove o broadcast do papel genérico USER** (fecha por completo o resíduo de IDOR).
+- [x] **3. Visibilidade por setor/hierarquia** — `buildVisibilityScope`: Membro só os próprios; Líder II próprios + dos seus Membros; Líder I tudo do setor; Diretoria/ADMIN tudo. Substitui o filtro de papel coarse e **remove o broadcast do papel genérico USER** (fecha por completo o resíduo de IDOR).
 - [ ] **4. Mascaramento de campos sensíveis** — CPF/RG/salário visíveis só a quem precisa (ex.: TI/SISTEMAS/DADOS/ADM não veem CPF/RG); auditoria de acesso.
 - [ ] **5. Ações de aprovação ricas** — deferir / indeferir / solicitar correção / solicitar informação complementar / encaminhar; devolução ao solicitante com reenvio.
 - [ ] **6. Filas de função** — tarefa de função vai à fila (qualquer Membro da função assume; fallback Líder II → Líder I se não houver Membro). Fila de Diretoria (qualquer diretor).
