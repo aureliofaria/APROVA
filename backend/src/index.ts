@@ -76,5 +76,9 @@ if (process.env.SERVE_FRONTEND === 'true') {
 // em testes (supertest) sem abrir uma porta.
 if (require.main === module) {
   app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
+  // Agendador in-process de recorrências de pagamento (idempotente).
+  // Ligado apenas via PAYMENTS_SCHEDULER_ENABLED=true; nunca em testes.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('./services/scheduler').startPaymentsScheduler();
 }
 export default app;
