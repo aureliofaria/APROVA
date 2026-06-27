@@ -43,21 +43,50 @@ async function main() {
   check('fluxo PAYMENT existe', !!payment);
   check('fluxo ONBOARDING existe', !!onboarding);
 
-  // 3) Criar solicitação de pagamento (como joao)
-  const created = await api('POST', '/api/requests', joao, { flowId: payment.id, title: 'E2E Pagamento', amountCents: 350000 });
+  // 3) Criar solicitação de pagamento VÁLIDA (como joao): categoria + campos obrigatórios
+  const validPay = { flowId: payment.id, title: 'E2E Pagamento', paymentCategory: 'COMPRA', amountCents: 350000, supplier: 'Fornecedor E2E', costCenter: 'TI-001', justification: 'compra necessária E2E' };
+  const created = await api('POST', '/api/requests', joao, validPay);
   check('cria solicitação de pagamento (201)', created.status === 201, `(status ${created.status})`);
   const reqId = created.data?.id;
+  check('pagamento persiste a categoria', created.data?.paymentCategory === 'COMPRA');
   const full = (await api('GET', `/api/requests/${reqId}`, admin)).data;
   check('solicitação tem tarefa(s) criada(s)', (full?.tasks?.length || 0) > 0);
 
-  // 4) Validação monetária: amount não-numérico -> 400
-  check('amountCents inválido é rejeitado (400)', (await api('POST', '/api/requests', joao, { flowId: payment.id, title: 'X', amountCents: 'abc' })).status === 400);
+  // 4) Validação de entrada (matriz de segurança)
+  check('amountCents não-numérico é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, amountCents: 'abc' })).status === 400);
+  check('pagamento sem categoria é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, paymentCategory: undefined })).status === 400);
+  check('categoria inválida é rejeitada (400)', (await api('POST', '/api/requests', joao, { ...validPay, paymentCategory: 'HACK' })).status === 400);
+  check('valor zero é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, amountCents: 0 })).status === 400);
+  check('valor negativo é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, amountCents: -500 })).status === 400);
+  check('overflow acima do teto é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, amountCents: 10000000001 })).status === 400);
+  check('COMPRA sem fornecedor é rejeitada (400)', (await api('POST', '/api/requests', joao, { ...validPay, supplier: '' })).status === 400);
+  check('sem centro de custo é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, costCenter: '' })).status === 400);
+  check('sem justificativa é rejeitado (400)', (await api('POST', '/api/requests', joao, { ...validPay, justification: '' })).status === 400);
+  // Arredondamento de centavos: fracionário vira inteiro (sem float)
+  const rounded = await api('POST', '/api/requests', joao, { ...validPay, amountCents: 100050.7 });
+  check('arredonda centavos para inteiro (sem float)', rounded.status === 201 && rounded.data?.amountCents === 100051, `(amount ${rounded.data?.amountCents})`);
 
-  // 5) Segregação: iniciador não aprova a própria solicitação
+  // 5) Segregação de funções: iniciador não aprova a própria solicitação
   check('iniciador NÃO aprova a própria (403)', (await api('POST', `/api/requests/${reqId}/approve`, joao, {})).status === 403);
+
+  // 5b) IDOR: o iniciador lê o próprio pedido; FINANCE (visão ampla) também.
+  // (O caso negativo — USER alheio sem envolvimento recebe 403 — é validado no
+  //  vitest payments.test.ts, pois o seed tem apenas um USER.)
+  check('iniciador lê o próprio pedido (200)', (await api('GET', `/api/requests/${reqId}`, joao)).status === 200);
+  check('FINANCE (visão ampla) lê pedido (200)', (await api('GET', `/api/requests/${reqId}`, fin)).status === 200);
 
   // 6) Rejeição exige motivo
   check('rejeição sem motivo é barrada (400)', (await api('POST', `/api/requests/${reqId}/reject`, gestor, {})).status === 400);
+
+  // 6b) JWT ausente/forjado nas rotas de pagamento
+  check('sem token: criar pagamento é 401', (await api('POST', '/api/requests', null, validPay)).status === 401);
+  check('token forjado é rejeitado (401)', (await api('GET', '/api/payments/recurrences', 'aaa.bbb.ccc')).status === 401);
+
+  // 6c) Recorrência: USER comum não cria (403); FINANCE cria (201); run idempotente
+  check('USER não cria recorrência (403)', (await api('POST', '/api/payments/recurrences', joao, { flowId: payment.id, title: 'R', paymentCategory: 'RECORRENCIA', amountCents: 1000, costCenter: 'C', justification: 'j' })).status === 403);
+  const recCreate = await api('POST', '/api/payments/recurrences', fin, { flowId: payment.id, title: 'Aluguel E2E', paymentCategory: 'RECORRENCIA', amountCents: 500000, supplier: 'Imob', costCenter: 'ADM-1', justification: 'aluguel', intervalUnit: 'MONTH', intervalCount: 1, nextRunAt: new Date(Date.now() - 86400000).toISOString() });
+  check('FINANCE cria recorrência (201)', recCreate.status === 201, `(status ${recCreate.status})`);
+  check('dispara geração de recorrências (200)', (await api('POST', '/api/payments/recurrences/run', fin, {})).status === 200);
 
   // 7) Inventário: catálogo, ativos, criação
   const items = (await api('GET', '/api/inventory/items', admin)).data || [];
