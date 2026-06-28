@@ -89,12 +89,18 @@ export function validateConditionPayload(
 export interface ApplicabilityContext {
   /** IDs dos resourceItems vinculados à solicitação. */
   resourceItemIds: Set<string>;
-  /** Mapa de field.key → value dos campos dinâmicos preenchidos. */
-  fieldValues: Map<string, string>;
+  /**
+   * Mapa de field.key → CONJUNTO de valores preenchidos para essa key na
+   * solicitação. É um Set (não um único valor) porque `FormField.key` é único
+   * só por ETAPA: a mesma key pode existir em etapas distintas com valores
+   * diferentes. Guardar todos os valores casa com a semântica exists/any do
+   * gate (`isItemApplicable`), evitando divergência GET-vs-gating.
+   */
+  fieldValues: Map<string, Set<string>>;
 }
 
 // Avalia se um item é aplicável dado um contexto já carregado (sem queries).
-// Usado pelo GET /:id para evitar N+1.
+// Usado pelo GET /:id para evitar N+1. Mesma semântica exists/any do gate.
 export function evaluateConditionInMemory(
   condition: ChecklistCondition | null,
   ctx: ApplicabilityContext
@@ -104,7 +110,8 @@ export function evaluateConditionInMemory(
     return ctx.resourceItemIds.has(condition.resourceItemId);
   }
   if (condition.type === 'fieldValue') {
-    return ctx.fieldValues.get(condition.fieldKey) === condition.equals;
+    // exists/any: a key tem ALGUM valor igual ao esperado (em qualquer etapa).
+    return ctx.fieldValues.get(condition.fieldKey)?.has(condition.equals) ?? false;
   }
   // Tipo desconhecido: fail-safe permissivo.
   return true;

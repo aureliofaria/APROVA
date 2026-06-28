@@ -126,9 +126,18 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     // os resourceItemIds e fieldValues da solicitação e avaliamos cada condição
     // EM MEMÓRIA (sem N+1). Incluímos os checklistItems de TODAS as etapas do
     // fluxo com seus estados (checked) e o booleano applicable para o frontend.
+    // fieldValues como Map<key, Set<value>>: a mesma key pode existir em etapas
+    // distintas (key é única só por etapa). Coletar TODOS os valores casa com a
+    // semântica exists/any do gate (isItemApplicable) — sem divergência.
+    const fieldValuesByKey = new Map<string, Set<string>>();
+    for (const fv of request.fieldValues as any[]) {
+      const key = fv.field.key as string;
+      if (!fieldValuesByKey.has(key)) fieldValuesByKey.set(key, new Set<string>());
+      fieldValuesByKey.get(key)!.add(fv.value as string);
+    }
     const ctx: ApplicabilityContext = {
       resourceItemIds: new Set(request.resources.map((r) => r.resourceItemId)),
-      fieldValues: new Map(request.fieldValues.map((fv: any) => [fv.field.key as string, fv.value as string])),
+      fieldValues: fieldValuesByKey,
     };
     // Enriquece cada etapa com checklistItems anotados com applicable + checked.
     const stepsWithChecklist = (masked as any).flow.steps.map((step: any) => {

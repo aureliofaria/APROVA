@@ -75,10 +75,26 @@ describe('checklist lib — parseCondition', () => {
 });
 
 describe('checklist lib — evaluateApplicabilityInMemory', () => {
+  // fieldValues: Map<key, Set<value>> (exists/any) — uma key pode ter vários
+  // valores entre etapas distintas.
   const ctx = {
     resourceItemIds: new Set(['r1', 'r2']),
-    fieldValues: new Map([['status', 'ativo'], ['tipo', 'pessoa_fisica']]),
+    fieldValues: new Map<string, Set<string>>([
+      ['status', new Set(['ativo'])],
+      ['tipo', new Set(['pessoa_fisica'])],
+    ]),
   };
+
+  it('fieldValue casa quando a key tem o valor entre VÁRIOS (key duplicada entre etapas)', () => {
+    // Simula a mesma key 'status' preenchida em 2 etapas: 'nao' e 'sim'.
+    const multi = {
+      resourceItemIds: new Set<string>(),
+      fieldValues: new Map<string, Set<string>>([['status', new Set(['nao', 'sim'])]]),
+    };
+    const item = [{ id: 'i1', condition: JSON.stringify({ type: 'fieldValue', fieldKey: 'status', equals: 'sim' }) }];
+    // exists/any: aplicável porque ALGUM valor da key é 'sim' (casa com o gate).
+    expect(evaluateApplicabilityInMemory(item, multi)[0].applicable).toBe(true);
+  });
 
   it('sem condição → applicable=true', () => {
     const items = [{ id: 'i1', condition: null }];
