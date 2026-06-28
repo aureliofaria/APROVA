@@ -306,6 +306,43 @@ describe('POST /:id/decision — FORWARD', () => {
     const destTasks = await prisma.requestTask.count({ where: { requestId: req.id, assigneeId: { in: [d1.id, d2.id] }, status: 'PENDING' } });
     expect(destTasks).toBe(2);
   });
+
+  it('encaminhar a papel SEM alçada na etapa (com authLevels) → 403 (fecha bypass de alçada)', async () => {
+    const initiator = await makeUser('USER');
+    const finance = await makeUser('FINANCE'); // aprovador legítimo da faixa
+    const hr = await makeUser('HR'); // papel sem alçada nesta etapa
+    const flow = await makeFlow('PAYMENT', [
+      { order: 0, authLevels: [{ name: 'A', minValueCents: 0, maxValueCents: null, requiredApprovers: 1, approverRole: 'FINANCE' }] },
+    ]);
+    const req = await newRequest(flow.id, initiator.id, 1000);
+    const { createRequestTasks } = await import('../src/services/workflow');
+    await createRequestTasks(req.id, flow.id, 0);
+
+    // por usuário HR → 403
+    const r1 = await request(app).post(`/api/requests/${req.id}/decision`).set(auth(tokenFor(finance.id))).send({ action: 'FORWARD', reason: 'x', forwardToUserId: hr.id });
+    expect(r1.status).toBe(403);
+    // por papel HR → 403
+    const r2 = await request(app).post(`/api/requests/${req.id}/decision`).set(auth(tokenFor(finance.id))).send({ action: 'FORWARD', reason: 'x', forwardToRole: 'HR' });
+    expect(r2.status).toBe(403);
+  });
+
+  it('encaminhar à Diretoria (escalonamento p/ cima) → 200 e o diretor decide', async () => {
+    const initiator = await makeUser('USER');
+    const finance = await makeUser('FINANCE');
+    const diretor = await makeUser('DIRETORIA');
+    const flow = await makeFlow('PAYMENT', [
+      { order: 0, authLevels: [{ name: 'A', minValueCents: 0, maxValueCents: null, requiredApprovers: 1, approverRole: 'FINANCE' }] },
+    ]);
+    const req = await newRequest(flow.id, initiator.id, 1000);
+    const { createRequestTasks } = await import('../src/services/workflow');
+    await createRequestTasks(req.id, flow.id, 0);
+
+    const fwd = await request(app).post(`/api/requests/${req.id}/decision`).set(auth(tokenFor(finance.id))).send({ action: 'FORWARD', reason: 'acima da alçada', forwardToRole: 'DIRETORIA' });
+    expect(fwd.status).toBe(200);
+    // O diretor (destino do encaminhamento) decide, mesmo sem alçada própria na faixa.
+    const def = await request(app).post(`/api/requests/${req.id}/decision`).set(auth(tokenFor(diretor.id))).send({ action: 'DEFER' });
+    expect(def.status).toBe(200);
+  });
 });
 
 describe('aprovador não age em pedido AWAITING_CORRECTION', () => {

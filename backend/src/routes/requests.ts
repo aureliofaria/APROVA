@@ -237,6 +237,21 @@ type DbClient = Prisma.TransactionClient | typeof prisma;
 // e rodada correntes) é autorizado a decidir — por id (forwardedToId) ou por papel
 // (forwardedToRole casando com user.role). A SoD permanece: o destino nunca pode
 // ser o iniciador.
+// Papéis ELEGÍVEIS como destino de um encaminhamento nesta etapa: a Diretoria
+// (escalonamento para cima) e os papéis que efetivamente TÊM alçada na própria
+// etapa. Fecha o furo de encaminhar a um papel sem alçada na faixa — que, de
+// outro modo, ganharia poder de decisão indevido sobre a etapa.
+function forwardEligibleRoles(step: any): Set<string> {
+  const roles = new Set<string>(['DIRETORIA']);
+  const authLevels = step?.authLevels ?? [];
+  if (authLevels.length > 0) {
+    for (const l of authLevels) if (l.approverRole) roles.add(l.approverRole);
+  } else {
+    for (const r of APPROVER_ROLES) roles.add(r as string);
+  }
+  return roles;
+}
+
 async function authorizeDecision(
   db: DbClient,
   request: { id: string; initiatorId: string; amountCents: number | null; currentStep: number; flow: { steps: any[] } },
@@ -256,12 +271,17 @@ async function authorizeDecision(
       authLevels.find((l: any) => amount >= (l.minValueCents ?? 0) && amount <= (l.maxValueCents ?? Infinity)) ??
       authLevels[authLevels.length - 1];
     if (user.role === level.approverRole) return { ok: true, status: 200, error: '' };
-    if (await isActiveForwardTarget(db, request, user)) return { ok: true, status: 200, error: '' };
+    // Destino de encaminhamento ativo só decide se for papel elegível da etapa.
+    if ((await isActiveForwardTarget(db, request, user)) && forwardEligibleRoles(step).has(user.role)) {
+      return { ok: true, status: 200, error: '' };
+    }
     return { ok: false, status: 403, error: 'Seu papel não tem alçada para aprovar esta etapa' };
   }
 
   if (APPROVER_ROLES.includes(user.role as any)) return { ok: true, status: 200, error: '' };
-  if (await isActiveForwardTarget(db, request, user)) return { ok: true, status: 200, error: '' };
+  if ((await isActiveForwardTarget(db, request, user)) && forwardEligibleRoles(step).has(user.role)) {
+    return { ok: true, status: 200, error: '' };
+  }
   return { ok: false, status: 403, error: 'Você não tem permissão para decidir esta solicitação' };
 }
 
@@ -327,6 +347,9 @@ async function handleDecision(
     if (hasUser === hasRole) {
       return { status: 400, body: { error: 'Encaminhamento exige exatamente um destino: forwardToUserId OU forwardToRole' } };
     }
+    // Destino precisa ter alçada na etapa (ou ser a Diretoria): encaminhar não
+    // pode conferir decisão a um papel sem alçada na faixa (escalonamento, não bypass).
+    const eligible = forwardEligibleRoles(request.flow.steps.find((s: any) => s.order === step));
     if (hasUser) {
       if (opts.forwardToUserId === reqUser.id) {
         return { status: 400, body: { error: 'Não é possível encaminhar para si mesmo' } };
@@ -338,6 +361,9 @@ async function handleDecision(
       if (!target || !target.isActive) {
         return { status: 400, body: { error: 'Destino do encaminhamento inválido' } };
       }
+      if (!eligible.has(target.role)) {
+        return { status: 403, body: { error: 'O destino não tem alçada para decidir esta etapa (encaminhe à Diretoria ou a um papel com alçada)' } };
+      }
       // Destino não pode já ter APROVADO/ENCAMINHADO nesta etapa+rodada.
       const prior = await prisma.approval.findFirst({
         where: { requestId, stepOrder: step, round, approverId: target.id, decision: { in: ['APPROVED', 'FORWARDED'] } },
@@ -347,6 +373,9 @@ async function handleDecision(
       }
       forwardAssignees = [{ id: target.id, name: target.name }];
     } else {
+      if (!eligible.has(opts.forwardToRole as string)) {
+        return { status: 403, body: { error: 'O papel destino não tem alçada para decidir esta etapa (encaminhe à Diretoria ou a um papel com alçada)' } };
+      }
       // Modelo de fila: todos os usuários ativos cujo papel casa, exceto o iniciador.
       const candidates = await prisma.user.findMany({
         where: { role: opts.forwardToRole, isActive: true, id: { not: request.initiatorId } },
@@ -520,33 +549,43 @@ router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Respons
 
     const returnStep = request.correctionReturnStep ?? request.currentStep;
 
-    await prisma.$transaction(async (tx) => {
-      // Nova rodada = maior round da etapa de retorno + 1 (decisões antigas não contam).
-      const round = await activeRound(tx, request.id, returnStep);
-      const nextRound = round + 1;
+    const RACE = Symbol('resubmit-race');
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Guard otimista contra reenvios concorrentes: só prossegue quem efetivar a
+        // transição AWAITING_CORRECTION -> IN_PROGRESS. O perdedor da corrida (count 0)
+        // aborta com 409 e não gera tarefas/auditoria duplicadas.
+        const moved = await tx.request.updateMany({
+          where: { id: request.id, status: 'AWAITING_CORRECTION' },
+          data: { status: 'IN_PROGRESS', currentStep: returnStep, correctionReturnStep: null },
+        });
+        if (moved.count === 0) throw RACE;
 
-      // Cancela tarefas residuais da etapa de retorno antes de recriar.
-      await tx.requestTask.updateMany({
-        where: { requestId: request.id, step: { order: returnStep }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
-        data: { status: 'CANCELLED' },
+        // Nova rodada = maior round da etapa de retorno + 1 (decisões antigas não contam).
+        const round = await activeRound(tx, request.id, returnStep);
+        const nextRound = round + 1;
+
+        // Cancela tarefas residuais da etapa de retorno antes de recriar.
+        await tx.requestTask.updateMany({
+          where: { requestId: request.id, step: { order: returnStep }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+          data: { status: 'CANCELLED' },
+        });
+
+        // Recria as tarefas da etapa de retorno (assignees pela definição da etapa).
+        await createRequestTasks(request.id, request.flowId, returnStep, tx);
+
+        await tx.auditLog.create({
+          data: {
+            requestId: request.id, userId: req.user.id, userName: req.user.name,
+            action: 'RESUBMITTED',
+            details: `Reenviado pelo solicitante (etapa ${returnStep}, rodada ${nextRound})`,
+          },
+        });
       });
-
-      await tx.request.update({
-        where: { id: request.id },
-        data: { status: 'IN_PROGRESS', currentStep: returnStep, correctionReturnStep: null },
-      });
-
-      // Recria as tarefas da etapa de retorno (assignees pela definição da etapa).
-      await createRequestTasks(request.id, request.flowId, returnStep, tx);
-
-      await tx.auditLog.create({
-        data: {
-          requestId: request.id, userId: req.user.id, userName: req.user.name,
-          action: 'RESUBMITTED',
-          details: `Reenviado pelo solicitante (etapa ${returnStep}, rodada ${nextRound})`,
-        },
-      });
-    });
+    } catch (e) {
+      if (e === RACE) { res.status(409).json({ error: 'Solicitação não está aguardando correção' }); return; }
+      throw e;
+    }
 
     await publishWorkflowEvent('RESUBMITTED', request.id, { userId: req.user.id });
 
