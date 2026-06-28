@@ -2,7 +2,9 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, handleUpload } from '../middleware/upload';
-import { advanceRequest, processSlaExpiries } from '../services/workflow';
+import { advanceRequest, processSlaExpiries, publishWorkflowEvent } from '../services/workflow';
+import { notify } from '../services/notifications';
+import { isFunctionRole } from '../lib/queue';
 
 const router = Router();
 
@@ -12,7 +14,9 @@ router.get('/my', authenticate, async (req: AuthRequest, res: Response) => {
     processSlaExpiries().catch(() => {});
 
     const tasks = await prisma.requestTask.findMany({
-      where: { assigneeId: req.user.id },
+      // Não polui a lista com tarefas de fila que outro colega assumiu (irmãs
+      // CANCELLED de quem "perdeu" a fila).
+      where: { assigneeId: req.user.id, status: { not: 'CANCELLED' } },
       include: {
         request: { include: { flow: true, initiator: { select: { id: true, name: true } } } },
         step: true,
@@ -156,25 +160,94 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
       res.status(400).json({ error: 'Esta etapa exige pelo menos um anexo antes da conclusão' }); return;
     }
     const { notes } = req.body;
-    const task = await prisma.requestTask.update({
-      where: { id: req.params.id },
-      data: { status: 'COMPLETED', completedAt: new Date(), notes },
-    });
+    // Concluir implica assumir (Passo 6 — REF.2): se a etapa é de FUNÇÃO (fila),
+    // marcar COMPLETED e, na mesma transação, cancelar as irmãs PENDING da etapa.
+    // Assim a fila fecha mesmo que o usuário conclua sem ter clicado "assumir".
+    // Etapas legadas/aprovação mantêm o comportamento atual (sem cancelar irmãs).
+    const step = await prisma.flowStep.findUnique({ where: { id: owned.stepId }, select: { requiredRole: true } });
+    const isFunctionStep = isFunctionRole(step?.requiredRole);
 
-    await prisma.auditLog.create({
-      data: {
-        requestId: task.requestId,
-        userId: req.user.id,
-        userName: req.user.name,
-        action: 'TASK_COMPLETED',
-        details: `Tarefa concluída: ${task.title}`,
-      },
+    const task = await prisma.$transaction(async (tx) => {
+      const t = await tx.requestTask.update({
+        where: { id: req.params.id },
+        data: { status: 'COMPLETED', completedAt: new Date(), notes },
+      });
+      if (isFunctionStep) {
+        await tx.requestTask.updateMany({
+          where: { requestId: t.requestId, stepId: t.stepId, status: 'PENDING', id: { not: t.id } },
+          data: { status: 'CANCELLED' },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          requestId: t.requestId,
+          userId: req.user.id,
+          userName: req.user.name,
+          action: 'TASK_COMPLETED',
+          details: `Tarefa concluída: ${t.title}`,
+        },
+      });
+      return t;
     });
 
     await advanceRequest(task.requestId);
     res.json(task);
   } catch {
     res.status(500).json({ error: 'Erro ao concluir tarefa' });
+  }
+});
+
+// Assumir uma tarefa de FILA (Passo 6 — REF.1). O claim age na PRÓPRIA linha
+// do usuário: no fan-out, cada elegível já recebeu a sua RequestTask, então
+// quem tem linha era elegível — não há reatribuição de assigneeId nem nova
+// resolução da fila. Concorrência: a transição PENDING→IN_PROGRESS é otimista
+// (updateMany com guarda de status); na mesma transação, as irmãs PENDING da
+// etapa são canceladas e quem assumiu fica como único responsável ativo.
+router.post('/:id/claim', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const task = await prisma.requestTask.findUnique({ where: { id: req.params.id } });
+    if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return; }
+    // A fila é DELE: a linha já é do próprio usuário (ou ADMIN intervém).
+    if (task.assigneeId !== req.user.id && req.user.role !== 'ADMIN') {
+      res.status(403).json({ error: 'Esta tarefa não está atribuída a você' }); return;
+    }
+
+    const claimed = await prisma.$transaction(async (tx) => {
+      // Guarda otimista: só assume se ainda estiver PENDING.
+      const upd = await tx.requestTask.updateMany({
+        where: { id: task.id, status: 'PENDING' },
+        data: { status: 'IN_PROGRESS' },
+      });
+      if (upd.count === 0) return false;
+
+      // Cancela as irmãs PENDING da mesma (requestId, stepId) — padrão do fan-out.
+      await tx.requestTask.updateMany({
+        where: { requestId: task.requestId, stepId: task.stepId, status: 'PENDING', id: { not: task.id } },
+        data: { status: 'CANCELLED' },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          requestId: task.requestId,
+          userId: req.user.id,
+          userName: req.user.name,
+          action: 'TASK_CLAIMED',
+          details: `Tarefa assumida da fila: ${task.title}`,
+        },
+      });
+      await notify(tx, { userId: req.user.id, type: 'TASK_CLAIMED', title: 'Tarefa assumida', body: `Você assumiu a tarefa "${task.title}".`, requestId: task.requestId });
+      return true;
+    });
+
+    if (!claimed) { res.status(409).json({ error: 'Tarefa já foi assumida' }); return; }
+
+    // Ponto de integração futuro com o ERP (no-op hoje).
+    await publishWorkflowEvent('TASK_CLAIMED', task.requestId, { taskId: task.id, userId: req.user.id });
+
+    const updated = await prisma.requestTask.findUnique({ where: { id: task.id } });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Erro ao assumir tarefa' });
   }
 });
 

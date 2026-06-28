@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { notify } from './notifications';
+import { isFunctionRole, resolveQueueEligibles } from '../lib/queue';
 
 // Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
 // funções de workflow sejam compostas dentro de uma transação atômica.
@@ -97,11 +98,19 @@ export async function createRequestTasks(requestId: string, flowId: string, step
 
     const hasAuthLevels = step.authLevels.length > 0;
     const isSelfSubmissionStep = !hasAuthLevels && (!step.requiredRole || step.requiredRole === 'USER');
+    // Etapa de FUNÇÃO (fila): requiredRole ∈ FUNCTION_ROLES. A resolução por
+    // hierarquia (MEMBRO→LÍDER II→LÍDER I; Diretoria = qualquer diretor) faz o
+    // fan-out: cada elegível recebe a SUA tarefa PENDING e "assume" na própria
+    // linha. Papéis legados (MANAGER/FINANCE/HR/USER) seguem o caminho atual.
+    const isFunctionStep = isFunctionRole(step.requiredRole);
 
     let assignees: { id: string; name: string }[] = [];
     if (isSelfSubmissionStep) {
       // Submissão do iniciador: só o iniciador, sem difundir ao papel inteiro.
       if (initiator) assignees = [initiator];
+    } else if (isFunctionStep) {
+      // Fila de função: já inclui fallback hierárquico e fallback ao iniciador.
+      assignees = await resolveQueueEligibles(db, step, request.initiatorId);
     } else {
       if (step.requiredRole) {
         assignees = await db.user.findMany({
@@ -130,8 +139,12 @@ export async function createRequestTasks(requestId: string, flowId: string, step
         },
       });
       // Notifica o responsável sobre a nova tarefa (exceto o próprio iniciador).
+      // Em etapas de fila, o texto sinaliza que é preciso ASSUMIR para trabalhar.
       if (assignee.id !== request.initiatorId) {
-        await notify(db, { userId: assignee.id, type: 'TASK_ASSIGNED', title: 'Nova tarefa atribuída', body: `Você tem uma tarefa em "${request.title}": ${step.name}.`, requestId });
+        const body = isFunctionStep
+          ? `Tarefa na fila — assuma para trabalhar em "${request.title}": ${step.name}.`
+          : `Você tem uma tarefa em "${request.title}": ${step.name}.`;
+        await notify(db, { userId: assignee.id, type: 'TASK_ASSIGNED', title: 'Nova tarefa atribuída', body, requestId });
       }
       tasksCreated++;
     }
@@ -376,9 +389,12 @@ export async function isStepComplete(requestId: string, stepOrder: number, db: D
       if (!hasResource) continue;
     }
 
+    // Tarefas CANCELLED (irmãs perdedoras de uma fila assumida/concluída) não
+    // são COMPLETED e travariam a etapa — considerar apenas as NÃO-CANCELLED.
     const stepTasks = request.tasks.filter(t => t.stepId === step.id);
-    if (stepTasks.length === 0) return false;
-    if (!stepTasks.every(t => t.status === 'COMPLETED')) return false;
+    const activeTasks = stepTasks.filter(t => t.status !== 'CANCELLED');
+    if (activeTasks.length === 0) return false;
+    if (!activeTasks.every(t => t.status === 'COMPLETED')) return false;
 
     if (step.authLevels.length > 0) {
       const amount = request.amountCents ?? 0;
