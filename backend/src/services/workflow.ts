@@ -40,6 +40,22 @@ function evaluateNextOrder(
   return null;
 }
 
+// Rodada ATIVA de decisão de uma etapa. Reenvios após correção abrem nova rodada
+// sem criar Approval, então a rodada ativa não é simplesmente o MAX(round) das
+// aprovações: se a maior rodada já terminou em CORRECTION_REQUESTED (ou seja, foi
+// devolvida e reenviada), a rodada ativa é MAX(round)+1. As decisões da etapa são
+// sempre gravadas/contadas nesta rodada — decisões de rodadas anteriores não contam.
+export async function activeRound(db: Db, requestId: string, stepOrder: number): Promise<number> {
+  const approvals = await db.approval.findMany({
+    where: { requestId, stepOrder },
+    select: { round: true, decision: true },
+  });
+  if (approvals.length === 0) return 0;
+  const maxRound = approvals.reduce((m, a) => Math.max(m, a.round), 0);
+  const correctionAtMax = approvals.some(a => a.round === maxRound && a.decision === 'CORRECTION_REQUESTED');
+  return correctionAtMax ? maxRound + 1 : maxRound;
+}
+
 export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma) {
   const [flow, resources, request] = await Promise.all([
     db.flowTemplate.findUnique({
@@ -289,7 +305,9 @@ export async function advanceRequest(requestId: string) {
       include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
     });
     if (!request) return;
-    if (['COMPLETED', 'REJECTED', 'CANCELLED'].includes(request.status)) return;
+    // AWAITING_CORRECTION não avança: o pedido voltou ao solicitante e só segue
+    // após reenvio (resubmit), que restaura IN_PROGRESS na etapa de correção.
+    if (['COMPLETED', 'REJECTED', 'CANCELLED', 'AWAITING_CORRECTION'].includes(request.status)) return;
 
     const complete = await isStepComplete(requestId, request.currentStep, tx);
     if (!complete) return;
@@ -370,14 +388,33 @@ export async function isStepComplete(requestId: string, stepOrder: number, db: D
         const max = lvl.maxValueCents ?? Infinity;
         if (amount >= min && amount <= max) { required = lvl.requiredApprovers; break; }
       }
+      // Conta apenas aprovações (decision=APPROVED) da RODADA ATIVA da etapa.
+      // Decisões de rodadas anteriores (ex.: antes de uma correção/reenvio) e
+      // decisões não-aprovadoras (CORRECTION_REQUESTED/FORWARDED) não contam.
+      const round = await activeRound(db, requestId, stepOrder);
       const approved = new Set(
-        request.approvals.filter(a => a.decision === 'APPROVED').map(a => a.approverId)
+        request.approvals
+          .filter(a => a.decision === 'APPROVED' && a.round === round)
+          .map(a => a.approverId)
       ).size;
       if (approved < required) return false;
     }
   }
 
   return true;
+}
+
+// Ponto de integração futuro com o ERP (Sankhya): publica um evento de workflow
+// ao fim de cada ação de aprovação. Hoje é NO-OP por desenho — quando a
+// integração entrar (Passo futuro), aqui se enfileira o evento para o ERP.
+// Mantém o contrato de chamada limpo desde já. Não lança: nunca deve quebrar a
+// transação de negócio que a precede.
+export async function publishWorkflowEvent(
+  _type: string,
+  _requestId: string,
+  _payload?: Record<string, unknown>,
+): Promise<void> {
+  // intencionalmente vazio (no-op) até a integração com o ERP existir.
 }
 
 export async function checkAuthorizationLevel(requestId: string) {

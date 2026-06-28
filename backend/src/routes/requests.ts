@@ -2,7 +2,8 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, handleUpload } from '../middleware/upload';
-import { createRequestTasks, advanceRequest } from '../services/workflow';
+import { createRequestTasks, advanceRequest, publishWorkflowEvent, activeRound } from '../services/workflow';
+import { Prisma } from '@prisma/client';
 import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
 import { notify, notifyMany } from '../services/notifications';
@@ -216,14 +217,31 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Verifica se o usuário tem autoridade para decidir (aprovar/rejeitar) a etapa atual.
+// ===========================================================================
+// Ações de aprovação ricas (Fase 0 · Passo 5)
+// DEFERIR · INDEFERIR · SOLICITAR CORREÇÃO · SOLICITAR INFORMAÇÃO · ENCAMINHAR
+// + reenvio do solicitante (resubmit). As ações compartilham autorização (SoD/
+// alçada/ADMIN + destino de encaminhamento) e correm em transação atômica.
+// ===========================================================================
+
+type DecisionAction = 'DEFER' | 'REJECT' | 'REQUEST_CORRECTION' | 'REQUEST_INFO' | 'FORWARD';
+
+// Aceita cliente normal ou de transação.
+type DbClient = Prisma.TransactionClient | typeof prisma;
+
+// Verifica se o usuário tem autoridade para decidir a etapa atual.
 // Regras: nunca o próprio solicitante (segregação de funções); ADMIN sempre pode;
 // se a etapa tem alçada, o papel deve casar com o approverRole da faixa de valor;
-// caso contrário, qualquer papel de aprovador genérico.
-function authorizeDecision(
-  request: { initiatorId: string; amountCents: number | null; currentStep: number; flow: { steps: any[] } },
+// senão, qualquer papel de aprovador genérico. ADICIONALMENTE (REFINAMENTO 2):
+// o destino de um ENCAMINHAMENTO ATIVO (Approval FORWARDED mais recente, na etapa
+// e rodada correntes) é autorizado a decidir — por id (forwardedToId) ou por papel
+// (forwardedToRole casando com user.role). A SoD permanece: o destino nunca pode
+// ser o iniciador.
+async function authorizeDecision(
+  db: DbClient,
+  request: { id: string; initiatorId: string; amountCents: number | null; currentStep: number; flow: { steps: any[] } },
   user: { id: string; role: string }
-): { ok: boolean; status: number; error: string } {
+): Promise<{ ok: boolean; status: number; error: string }> {
   if (request.initiatorId === user.id) {
     return { ok: false, status: 403, error: 'O solicitante não pode decidir a própria solicitação' };
   }
@@ -238,57 +256,234 @@ function authorizeDecision(
       authLevels.find((l: any) => amount >= (l.minValueCents ?? 0) && amount <= (l.maxValueCents ?? Infinity)) ??
       authLevels[authLevels.length - 1];
     if (user.role === level.approverRole) return { ok: true, status: 200, error: '' };
+    if (await isActiveForwardTarget(db, request, user)) return { ok: true, status: 200, error: '' };
     return { ok: false, status: 403, error: 'Seu papel não tem alçada para aprovar esta etapa' };
   }
 
   if (APPROVER_ROLES.includes(user.role as any)) return { ok: true, status: 200, error: '' };
+  if (await isActiveForwardTarget(db, request, user)) return { ok: true, status: 200, error: '' };
   return { ok: false, status: 403, error: 'Você não tem permissão para decidir esta solicitação' };
 }
 
+// O usuário é o destino do encaminhamento ATIVO da etapa+rodada correntes?
+// Considera apenas o FORWARDED mais recente (último encaminhamento manda).
+async function isActiveForwardTarget(
+  db: DbClient,
+  request: { id: string; currentStep: number },
+  user: { id: string; role: string }
+): Promise<boolean> {
+  const round = await activeRound(db, request.id, request.currentStep);
+  const lastForward = await db.approval.findFirst({
+    where: { requestId: request.id, stepOrder: request.currentStep, round, decision: 'FORWARDED' },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!lastForward) return false;
+  if (lastForward.forwardedToId && lastForward.forwardedToId === user.id) return true;
+  if (lastForward.forwardedToRole && lastForward.forwardedToRole === user.role) return true;
+  return false;
+}
+
+// Núcleo compartilhado por POST /:id/decision e pelos aliases /approve e /reject.
+// Retorna { status, body } já pronto para a resposta HTTP.
+async function handleDecision(
+  reqUser: { id: string; name: string; role: string },
+  requestId: string,
+  action: DecisionAction,
+  opts: { reason?: string; forwardToUserId?: string; forwardToRole?: string }
+): Promise<{ status: number; body: any }> {
+  const reason = opts.reason != null ? String(opts.reason).trim() : '';
+
+  // Motivo obrigatório para todas as ações exceto DEFER.
+  if (action !== 'DEFER' && !reason) {
+    return { status: 400, body: { error: 'O motivo é obrigatório para esta ação' } };
+  }
+
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
+  });
+  if (!request) return { status: 404, body: { error: 'Solicitação não encontrada' } };
+
+  // Estados terminais não aceitam decisão.
+  if (['COMPLETED', 'REJECTED', 'CANCELLED'].includes(request.status)) {
+    return { status: 409, body: { error: 'Solicitação não está em andamento' } };
+  }
+  // Pedido devolvido ao solicitante: o aprovador não age até o reenvio.
+  if (request.status === 'AWAITING_CORRECTION') {
+    return { status: 409, body: { error: 'Solicitação devolvida ao solicitante; aguardando reenvio' } };
+  }
+
+  const authz = await authorizeDecision(prisma, request, reqUser);
+  if (!authz.ok) return { status: authz.status, body: { error: authz.error } };
+
+  const step = request.currentStep;
+  const round = await activeRound(prisma, requestId, step);
+
+  // --- FORWARD: validações específicas do destino ---
+  let forwardAssignees: { id: string; name: string }[] = [];
+  if (action === 'FORWARD') {
+    const hasUser = !!opts.forwardToUserId;
+    const hasRole = !!opts.forwardToRole;
+    if (hasUser === hasRole) {
+      return { status: 400, body: { error: 'Encaminhamento exige exatamente um destino: forwardToUserId OU forwardToRole' } };
+    }
+    if (hasUser) {
+      if (opts.forwardToUserId === reqUser.id) {
+        return { status: 400, body: { error: 'Não é possível encaminhar para si mesmo' } };
+      }
+      if (opts.forwardToUserId === request.initiatorId) {
+        return { status: 403, body: { error: 'Não é possível encaminhar para o solicitante (segregação de funções)' } };
+      }
+      const target = await prisma.user.findUnique({ where: { id: opts.forwardToUserId } });
+      if (!target || !target.isActive) {
+        return { status: 400, body: { error: 'Destino do encaminhamento inválido' } };
+      }
+      // Destino não pode já ter APROVADO/ENCAMINHADO nesta etapa+rodada.
+      const prior = await prisma.approval.findFirst({
+        where: { requestId, stepOrder: step, round, approverId: target.id, decision: { in: ['APPROVED', 'FORWARDED'] } },
+      });
+      if (prior) {
+        return { status: 400, body: { error: 'O destino já decidiu (aprovou/encaminhou) esta etapa' } };
+      }
+      forwardAssignees = [{ id: target.id, name: target.name }];
+    } else {
+      // Modelo de fila: todos os usuários ativos cujo papel casa, exceto o iniciador.
+      const candidates = await prisma.user.findMany({
+        where: { role: opts.forwardToRole, isActive: true, id: { not: request.initiatorId } },
+        select: { id: true, name: true },
+      });
+      if (candidates.length === 0) {
+        return { status: 400, body: { error: 'Nenhum usuário ativo com o papel informado para encaminhar' } };
+      }
+      forwardAssignees = candidates;
+    }
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (action === 'DEFER') {
+        await tx.approval.create({
+          data: { requestId, approverId: reqUser.id, stepOrder: step, decision: 'APPROVED', comments: opts.reason || null, round },
+        });
+        await tx.auditLog.create({
+          data: { requestId, userId: reqUser.id, userName: reqUser.name, action: 'APPROVED', details: reason ? `Aprovado com comentário: ${reason}` : 'Aprovado' },
+        });
+      } else if (action === 'REJECT') {
+        await tx.approval.create({
+          data: { requestId, approverId: reqUser.id, stepOrder: step, decision: 'REJECTED', comments: reason, round },
+        });
+        // Tarefas abertas da etapa são canceladas; pedido vira terminal REJECTED.
+        await tx.requestTask.updateMany({
+          where: { requestId, step: { order: step }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+          data: { status: 'CANCELLED' },
+        });
+        await tx.request.update({ where: { id: requestId }, data: { status: 'REJECTED' } });
+        await tx.auditLog.create({
+          data: { requestId, userId: reqUser.id, userName: reqUser.name, action: 'REJECTED', details: `Rejeitado: ${reason}` },
+        });
+        if (request.initiatorId !== reqUser.id) {
+          await notify(tx, { userId: request.initiatorId, type: 'REQUEST_REJECTED', title: 'Solicitação rejeitada', body: `Sua solicitação "${request.title}" foi rejeitada: ${reason}`, requestId });
+        }
+      } else if (action === 'REQUEST_CORRECTION') {
+        await tx.approval.create({
+          data: { requestId, approverId: reqUser.id, stepOrder: step, decision: 'CORRECTION_REQUESTED', comments: reason, round },
+        });
+        await tx.requestTask.updateMany({
+          where: { requestId, step: { order: step }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+          data: { status: 'CANCELLED' },
+        });
+        await tx.comment.create({ data: { requestId, stepOrder: step, authorId: reqUser.id, body: reason } });
+        await tx.request.update({ where: { id: requestId }, data: { status: 'AWAITING_CORRECTION', correctionReturnStep: step } });
+        await tx.auditLog.create({
+          data: { requestId, userId: reqUser.id, userName: reqUser.name, action: 'CORRECTION_REQUESTED', details: `Correção solicitada: ${reason}` },
+        });
+        await notify(tx, { userId: request.initiatorId, type: 'REQUEST_CORRECTION_REQUESTED', title: 'Correção solicitada', body: `Sua solicitação "${request.title}" precisa de correção: ${reason}`, requestId });
+      } else if (action === 'REQUEST_INFO') {
+        // SEM Approval e SEM mudança de status/tarefas: a etapa segue com o aprovador.
+        await tx.comment.create({ data: { requestId, stepOrder: step, authorId: reqUser.id, body: reason } });
+        await tx.auditLog.create({
+          data: { requestId, userId: reqUser.id, userName: reqUser.name, action: 'INFO_REQUESTED', details: `Informação solicitada: ${reason}` },
+        });
+        await notify(tx, { userId: request.initiatorId, type: 'REQUEST_INFO_REQUESTED', title: 'Informação solicitada', body: `O aprovador pediu informações em "${request.title}": ${reason}`, requestId });
+      } else if (action === 'FORWARD') {
+        await tx.approval.create({
+          data: {
+            requestId, approverId: reqUser.id, stepOrder: step, decision: 'FORWARDED', comments: reason, round,
+            forwardedToId: opts.forwardToUserId ?? null,
+            forwardedToRole: opts.forwardToRole ?? null,
+          },
+        });
+        // A tarefa atual do aprovador é cancelada; cria-se tarefa DIRECIONADA ao(s)
+        // destino(s) — explícita, não pela definição da etapa (REFINAMENTO 1).
+        await tx.requestTask.updateMany({
+          where: { requestId, step: { order: step }, assigneeId: reqUser.id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+          data: { status: 'CANCELLED' },
+        });
+        const stepDef = request.flow.steps.find((s: any) => s.order === step);
+        const dueDate = stepDef?.deadlineHours ? new Date(Date.now() + stepDef.deadlineHours * 60 * 60 * 1000) : null;
+        for (const dest of forwardAssignees) {
+          await tx.requestTask.create({
+            data: {
+              requestId,
+              stepId: stepDef.id,
+              assigneeId: dest.id,
+              title: `Apreciação encaminhada: ${stepDef?.name ?? 'etapa'}`,
+              description: `Encaminhado por ${reqUser.name}. Motivo: ${reason}`,
+              status: 'PENDING',
+              dueDate,
+            },
+          });
+          await notify(tx, { userId: dest.id, type: 'TASK_ASSIGNED', title: 'Apreciação encaminhada', body: `Você recebeu uma apreciação encaminhada em "${request.title}": ${reason}`, requestId });
+        }
+        await tx.auditLog.create({
+          data: {
+            requestId, userId: reqUser.id, userName: reqUser.name, action: 'FORWARDED',
+            details: opts.forwardToUserId
+              ? `Encaminhado ao usuário ${forwardAssignees[0]?.name}: ${reason}`
+              : `Encaminhado ao papel ${opts.forwardToRole} (${forwardAssignees.length} destinatário(s)): ${reason}`,
+          },
+        });
+        // Notifica o aprovador que encaminhou (confirmação).
+        await notify(tx, { userId: reqUser.id, type: 'REQUEST_FORWARDED', title: 'Apreciação encaminhada', body: `Você encaminhou "${request.title}".`, requestId });
+      }
+    });
+  } catch (e: any) {
+    if (e?.code === 'P2002') return { status: 409, body: { error: 'Você já decidiu esta etapa' } };
+    throw e;
+  }
+
+  // Avanço só faz sentido em DEFER (as demais não avançam).
+  if (action === 'DEFER') await advanceRequest(requestId);
+
+  // Ponto de integração futuro com o ERP (no-op hoje).
+  await publishWorkflowEvent(`DECISION_${action}`, requestId, { userId: reqUser.id });
+
+  const updated = await prisma.request.findUnique({ where: { id: requestId } });
+  return { status: 200, body: updated };
+}
+
+router.post('/:id/decision', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { action, reason, forwardToUserId, forwardToRole } = req.body as {
+      action?: string; reason?: string; forwardToUserId?: string; forwardToRole?: string;
+    };
+    const valid: DecisionAction[] = ['DEFER', 'REJECT', 'REQUEST_CORRECTION', 'REQUEST_INFO', 'FORWARD'];
+    if (!action || !valid.includes(action as DecisionAction)) {
+      res.status(400).json({ error: 'Ação inválida' }); return;
+    }
+    const result = await handleDecision(req.user, req.params.id, action as DecisionAction, { reason, forwardToUserId, forwardToRole });
+    res.status(result.status).json(result.body);
+  } catch {
+    res.status(500).json({ error: 'Erro ao registrar decisão' });
+  }
+});
+
+// Aliases de compatibilidade — delegam ao núcleo handleDecision (DEFER/REJECT).
 router.post('/:id/approve', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { comments } = req.body;
-    const request = await prisma.request.findUnique({
-      where: { id: req.params.id },
-      include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
-    });
-    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (request.status === 'COMPLETED' || request.status === 'REJECTED' || request.status === 'CANCELLED') {
-      res.status(409).json({ error: 'Solicitação não está em andamento' }); return;
-    }
-
-    const authz = authorizeDecision(request, req.user);
-    if (!authz.ok) { res.status(authz.status).json({ error: authz.error }); return; }
-
-    try {
-      await prisma.$transaction([
-        prisma.approval.create({
-          data: {
-            requestId: req.params.id,
-            approverId: req.user.id,
-            stepOrder: request.currentStep,
-            decision: 'APPROVED',
-            comments,
-          },
-        }),
-        prisma.auditLog.create({
-          data: {
-            requestId: req.params.id,
-            userId: req.user.id,
-            userName: req.user.name,
-            action: 'APPROVED',
-            details: comments ? `Aprovado com comentário: ${comments}` : 'Aprovado',
-          },
-        }),
-      ]);
-    } catch (e: any) {
-      if (e?.code === 'P2002') { res.status(409).json({ error: 'Você já decidiu esta etapa' }); return; }
-      throw e;
-    }
-
-    await advanceRequest(req.params.id);
-    const updated = await prisma.request.findUnique({ where: { id: req.params.id } });
-    res.json(updated);
+    const result = await handleDecision(req.user, req.params.id, 'DEFER', { reason: comments });
+    res.status(result.status).json(result.body);
   } catch {
     res.status(500).json({ error: 'Erro ao aprovar solicitação' });
   }
@@ -297,45 +492,68 @@ router.post('/:id/approve', authenticate, async (req: AuthRequest, res: Response
 router.post('/:id/reject', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { comments } = req.body;
-    // Rejeição exige motivo (rastreabilidade — toda recusa fica justificada).
     if (!comments || !String(comments).trim()) {
       res.status(400).json({ error: 'O motivo da rejeição é obrigatório' }); return;
     }
-    const request = await prisma.request.findUnique({
-      where: { id: req.params.id },
-      include: { flow: { include: { steps: { orderBy: { order: 'asc' }, include: { authLevels: true } } } } },
-    });
-    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (request.status === 'COMPLETED' || request.status === 'REJECTED' || request.status === 'CANCELLED') {
-      res.status(409).json({ error: 'Solicitação não está em andamento' }); return;
-    }
-
-    const authz = authorizeDecision(request, req.user);
-    if (!authz.ok) { res.status(authz.status).json({ error: authz.error }); return; }
-
-    // Tudo numa transação: registro da decisão, mudança de status, auditoria e
-    // notificação são atômicos — falha no meio não deixa estado inconsistente.
-    try {
-      await prisma.$transaction(async (tx) => {
-        await tx.approval.create({
-          data: { requestId: req.params.id, approverId: req.user.id, stepOrder: request.currentStep, decision: 'REJECTED', comments },
-        });
-        await tx.request.update({ where: { id: req.params.id }, data: { status: 'REJECTED' } });
-        await tx.auditLog.create({
-          data: { requestId: req.params.id, userId: req.user.id, userName: req.user.name, action: 'REJECTED', details: `Rejeitado: ${comments}` },
-        });
-        if (request.initiatorId !== req.user.id) {
-          await notify(tx, { userId: request.initiatorId, type: 'REQUEST_REJECTED', title: 'Solicitação rejeitada', body: `Sua solicitação "${request.title}" foi rejeitada: ${comments}`, requestId: req.params.id });
-        }
-      });
-    } catch (e: any) {
-      if (e?.code === 'P2002') { res.status(409).json({ error: 'Você já decidiu esta etapa' }); return; }
-      throw e;
-    }
-
-    res.json({ message: 'Solicitação rejeitada' });
+    const result = await handleDecision(req.user, req.params.id, 'REJECT', { reason: comments });
+    if (result.status === 200) { res.json({ message: 'Solicitação rejeitada' }); return; }
+    res.status(result.status).json(result.body);
   } catch {
     res.status(500).json({ error: 'Erro ao rejeitar solicitação' });
+  }
+});
+
+// Reenvio do solicitante após SOLICITAR CORREÇÃO. Só o iniciador (ou ADMIN);
+// exige status AWAITING_CORRECTION; abre nova rodada (round+1) na etapa de retorno,
+// recria as tarefas da etapa (SoD/alçada restaurados naturalmente) e volta a
+// IN_PROGRESS. Notifica os responsáveis da etapa recriada.
+router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const request = await prisma.request.findUnique({ where: { id: req.params.id } });
+    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (request.initiatorId !== req.user.id && req.user.role !== 'ADMIN') {
+      res.status(403).json({ error: 'Apenas o solicitante pode reenviar' }); return;
+    }
+    if (request.status !== 'AWAITING_CORRECTION') {
+      res.status(409).json({ error: 'Solicitação não está aguardando correção' }); return;
+    }
+
+    const returnStep = request.correctionReturnStep ?? request.currentStep;
+
+    await prisma.$transaction(async (tx) => {
+      // Nova rodada = maior round da etapa de retorno + 1 (decisões antigas não contam).
+      const round = await activeRound(tx, request.id, returnStep);
+      const nextRound = round + 1;
+
+      // Cancela tarefas residuais da etapa de retorno antes de recriar.
+      await tx.requestTask.updateMany({
+        where: { requestId: request.id, step: { order: returnStep }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+        data: { status: 'CANCELLED' },
+      });
+
+      await tx.request.update({
+        where: { id: request.id },
+        data: { status: 'IN_PROGRESS', currentStep: returnStep, correctionReturnStep: null },
+      });
+
+      // Recria as tarefas da etapa de retorno (assignees pela definição da etapa).
+      await createRequestTasks(request.id, request.flowId, returnStep, tx);
+
+      await tx.auditLog.create({
+        data: {
+          requestId: request.id, userId: req.user.id, userName: req.user.name,
+          action: 'RESUBMITTED',
+          details: `Reenviado pelo solicitante (etapa ${returnStep}, rodada ${nextRound})`,
+        },
+      });
+    });
+
+    await publishWorkflowEvent('RESUBMITTED', request.id, { userId: req.user.id });
+
+    const updated = await prisma.request.findUnique({ where: { id: request.id } });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Erro ao reenviar solicitação' });
   }
 });
 

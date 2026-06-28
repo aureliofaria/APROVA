@@ -25,6 +25,7 @@ model User {
   initiatedRequests       Request[]                @relation("Initiator")
   assignedTasks           RequestTask[]
   approvals               Approval[]
+  forwardedApprovals      Approval[]               @relation("ApprovalForwardTarget")
   sectorRoles             SectorMember[]
   comments                Comment[]
   notifications           Notification[]
@@ -152,6 +153,9 @@ model Request {
   description      String?
   status           String            @default("PENDING")
   currentStep      Int               @default(0)
+  // Etapa para a qual o pedido retorna quando o solicitante reenvia após uma
+  // SOLICITAÇÃO DE CORREÇÃO (status AWAITING_CORRECTION). Nulo fora desse estado.
+  correctionReturnStep Int?
   targetEmployee   String?
   targetDepartment String?
   startDate        String?
@@ -259,13 +263,22 @@ model Approval {
   approverId String
   approver   User     @relation(fields: [approverId], references: [id])
   stepOrder  Int
+  // APPROVED | REJECTED | CORRECTION_REQUESTED | FORWARDED
   decision   String
   comments   String?
+  // Destino de um ENCAMINHAMENTO (decision=FORWARDED): usuário específico OU papel
+  // (modelo de fila). Exatamente um dos dois é preenchido no encaminhamento.
+  forwardedToId   String?
+  forwardedTo     User?    @relation("ApprovalForwardTarget", fields: [forwardedToId], references: [id])
+  forwardedToRole String?
+  // Rodada de decisão da etapa. Reenvios após correção incrementam o round, de
+  // modo que decisões de rodadas anteriores não contam para a completude atual.
+  round      Int      @default(0)
   createdAt  DateTime @default(now())
 
-  // Impede que o mesmo aprovador registre mais de uma decisão na mesma etapa,
+  // Impede que o mesmo aprovador registre mais de uma decisão na mesma etapa+rodada,
   // o que poderia burlar a exigência de múltiplos aprovadores (requiredApprovers).
-  @@unique([requestId, stepOrder, approverId])
+  @@unique([requestId, stepOrder, approverId, round])
 }
 
 model AuditLog {
