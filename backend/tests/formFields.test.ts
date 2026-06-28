@@ -179,6 +179,9 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
       const good = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
         .send({ stepOrder: 0, values: [{ fieldId: cpf.id, value: '529.982.247-25' }] });
       expect(good.status).toBe(200);
+      // A resposta de gravação NÃO ecoa o valor cru (PII só sai pelo mascaramento).
+      expect(good.body).toEqual({ ok: true, count: 1, savedFieldIds: [cpf.id] });
+      expect(JSON.stringify(good.body)).not.toContain('529.982.247-25');
       const stored = await prisma.requestFieldValue.findFirstOrThrow({ where: { requestId: reqRow.id, fieldId: cpf.id } });
       expect(stored.value).toBe('529.982.247-25'); // armazenado como enviado
     });

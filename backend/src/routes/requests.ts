@@ -676,10 +676,10 @@ router.post('/:id/fields', authenticate, async (req: AuthRequest, res: Response)
       }
     });
 
-    const saved = await prisma.requestFieldValue.findMany({
-      where: { requestId: request.id, fieldId: { in: prepared.map((p) => p.fieldId) } },
-    });
-    res.json(saved);
+    // Não ecoa os VALORES na resposta de gravação: PII (CPF/RG/salário...) só é
+    // serializada pelo motor de máscara no GET /:id. Devolve apenas a confirmação
+    // e os fieldIds gravados (consistência LGPD; sem rota fora do mascaramento).
+    res.json({ ok: true, count: prepared.length, savedFieldIds: prepared.map((p) => p.fieldId) });
   } catch {
     res.status(500).json({ error: 'Erro ao gravar valores de campos' });
   }
