@@ -118,6 +118,38 @@ describe('Parâmetros financeiros (Fase 0 · Passo 12)', () => {
       expect(res.status).toBe(403);
     });
 
+    it('Líder II do Financeiro NÃO pode editar (só LIDER_1) → 403', async () => {
+      const lider2 = await makeUser('USER');
+      const sector = await makeSector('Financeiro');
+      await addMember(sector.id, lider2.id, 'LIDER_2');
+      const res = await request(app)
+        .put(`/api/finance-params/${sector.id}/2026/6`)
+        .set(auth(tokenFor(lider2.id)))
+        .send({ ceilingCents: 50000 });
+      expect(res.status).toBe(403);
+    });
+
+    it('DIRETORIA pode editar → 200', async () => {
+      const diretor = await makeUser('DIRETORIA');
+      const sector = await makeSector('Financeiro');
+      const res = await request(app)
+        .put(`/api/finance-params/${sector.id}/2026/6`)
+        .set(auth(tokenFor(diretor.id)))
+        .send({ ceilingCents: 70000 });
+      expect(res.status).toBe(200);
+      expect(res.body.ceilingCents).toBe(70000);
+    });
+
+    it('ceilingCents ausente → 400', async () => {
+      const admin = await makeUser('ADMIN');
+      const sector = await makeSector();
+      const res = await request(app)
+        .put(`/api/finance-params/${sector.id}/2026/6`)
+        .set(auth(tokenFor(admin.id)))
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
     it('ceilingCents inválido (não numérico) → 400', async () => {
       const admin = await makeUser('ADMIN');
       const sector = await makeSector();
@@ -376,6 +408,21 @@ describe('Parâmetros financeiros (Fase 0 · Passo 12)', () => {
       const r = await decidePaymentRouting({ sectorId: sector.id, amountCents: 1000, year: 2026, month: 6, hasForecast: true });
       expect(r.target).toBe('FINANCE_LEADER');
       expect(r.reason).toBe('Sem teto cadastrado');
+    });
+
+    it('limite: amount == teto, saldo cheio → FINANCE_MEMBER (não "supera")', async () => {
+      const sector = await comTeto(5000);
+      const r = await decidePaymentRouting({ sectorId: sector.id, amountCents: 5000, year: 2026, month: 6, hasForecast: true });
+      expect(r.target).toBe('FINANCE_MEMBER');
+    });
+
+    it('limite: saldo == amount (consumido deixa exatamente o valor) → FINANCE_MEMBER', async () => {
+      const sector = await comTeto(10000);
+      const dia = new Date(Date.UTC(2026, 5, 10));
+      await makePaidRequest({ sectorId: sector.id, flowType: 'PAYMENT', amountCents: 6000, createdAt: dia });
+      // saldo = 10000 - 6000 = 4000; amount = 4000 → balance < amount é FALSO → MEMBER
+      const r = await decidePaymentRouting({ sectorId: sector.id, amountCents: 4000, year: 2026, month: 6, hasForecast: true });
+      expect(r.target).toBe('FINANCE_MEMBER');
     });
   });
 
