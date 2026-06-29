@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
-import { notify } from './notifications';
+import { notify, notifyMany } from './notifications';
 import { isFunctionRole, resolveQueueEligibles } from '../lib/queue';
 
 // Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
@@ -174,7 +174,7 @@ export async function processSlaExpiries(): Promise<number> {
         include: {
           handlingSector: {
             include: {
-              members: { where: { role: 'LIDER' }, include: { user: { select: { id: true, name: true } } } },
+              members: { where: { level: 'LIDER_1' }, include: { user: { select: { id: true, name: true } } } },
             },
           },
         },
@@ -228,6 +228,214 @@ export async function processSlaExpiries(): Promise<number> {
   }
 
   return expiredTasks.length;
+}
+
+// ===========================================================================
+// Escalonamento temporal (Fase 0 · Passo 11)
+//
+// Independente do SLA por prazo (dueDate), o escalonamento dispara por IDADE da
+// tarefa (dias desde createdAt), em três estágios de severidade crescente:
+//   Estágio 1 (≥ day1, padrão 2 dias): lembra o responsável.
+//   Estágio 2 (≥ day2, padrão 3 dias): aciona o Líder I do setor + o responsável.
+//   Estágio 3 (≥ day3, padrão 7 dias): transfere ao Líder I (se houver), marca
+//     slaEscalated e notifica responsável anterior + líder + iniciador.
+// A cadência é configurável por etapa via FlowStep.escalationDay1/2/3 (overrides).
+// A guarda escalationStage < N garante idempotência. Cada execução dispara
+// no máximo UM estágio (o mais severo ainda não disparado).
+// ===========================================================================
+
+const DIA_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_ESCALATION_DAYS = { d1: 2, d2: 3, d3: 7 } as const;
+
+// Resolve o Líder I do setor que trata a etapa (hierarquia Fase 0: level
+// 'LIDER_1', NÃO o papel legado role 'LIDER'). Retorna null se não houver.
+async function resolveStepLeader(
+  handlingSectorId: string | null | undefined
+): Promise<{ id: string; name: string } | null> {
+  if (!handlingSectorId) return null;
+  const leader = await prisma.sectorMember.findFirst({
+    where: { sectorId: handlingSectorId, level: 'LIDER_1' },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  return leader ? { id: leader.user.id, name: leader.user.name } : null;
+}
+
+// Sufixo com a justificativa de atraso, quando registrada — anexado ao corpo das
+// notificações dos estágios 1 e 2 para dar contexto a quem é acionado.
+function justificationSuffix(justification: string | null | undefined): string {
+  return justification ? ` Justificativa do atraso: "${justification}".` : '';
+}
+
+interface EscalationTask {
+  id: string;
+  requestId: string;
+  title: string;
+  assigneeId: string;
+  escalationStage: number;
+  delayJustification: string | null;
+  assignee: { id: string; name: string };
+  request: { id: string; title: string; initiator: { id: string; name: string } };
+  step: {
+    escalationDay1: number | null;
+    escalationDay2: number | null;
+    escalationDay3: number | null;
+    handlingSectorId: string | null;
+  };
+}
+
+// Estágio 1: lembra o responsável (TASK_DELAY_REMINDER). Idempotente via guarda
+// escalationStage < 1 no updateMany dentro da transação.
+async function applyStage1(task: EscalationTask): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const upd = await tx.requestTask.updateMany({
+      where: { id: task.id, escalationStage: { lt: 1 } },
+      data: { escalationStage: 1 },
+    });
+    if (upd.count === 0) return false;
+    await notify(tx, {
+      userId: task.assigneeId,
+      type: 'TASK_DELAY_REMINDER',
+      title: 'Tarefa atrasada — lembrete',
+      body: `A tarefa "${task.title}" em "${task.request.title}" está atrasada.` + justificationSuffix(task.delayJustification),
+      requestId: task.requestId,
+    });
+    await tx.auditLog.create({
+      data: {
+        requestId: task.requestId, userId: 'system', userName: 'Sistema',
+        action: 'ESCALATION_STAGE_1',
+        details: `Escalonamento estágio 1 — lembrete ao responsável ${task.assignee.name} sobre a tarefa "${task.title}"`,
+      },
+    });
+    return true;
+  });
+}
+
+// Estágio 2: aciona o Líder I do setor + o responsável. Sem líder, notifica só o
+// responsável. Idempotente via guarda escalationStage < 2.
+async function applyStage2(task: EscalationTask): Promise<boolean> {
+  const leader = await resolveStepLeader(task.step.handlingSectorId);
+  return prisma.$transaction(async (tx) => {
+    const upd = await tx.requestTask.updateMany({
+      where: { id: task.id, escalationStage: { lt: 2 } },
+      data: { escalationStage: 2 },
+    });
+    if (upd.count === 0) return false;
+    const suffix = justificationSuffix(task.delayJustification);
+    if (leader) {
+      await notify(tx, {
+        userId: leader.id,
+        type: 'TASK_ESCALATED_TO_LEADER',
+        title: 'Tarefa escalonada à liderança',
+        body: `A tarefa "${task.title}" em "${task.request.title}" segue atrasada com ${task.assignee.name}.` + suffix,
+        requestId: task.requestId,
+      });
+    }
+    await notify(tx, {
+      userId: task.assigneeId,
+      type: 'TASK_DELAY_REMINDER',
+      title: 'Tarefa atrasada — escalonada',
+      body: `A tarefa "${task.title}" em "${task.request.title}" foi escalonada à liderança.` + suffix,
+      requestId: task.requestId,
+    });
+    await tx.auditLog.create({
+      data: {
+        requestId: task.requestId, userId: 'system', userName: 'Sistema',
+        action: 'ESCALATION_STAGE_2',
+        details: leader
+          ? `Escalonamento estágio 2 — acionado o líder ${leader.name} sobre a tarefa "${task.title}"`
+          : `Escalonamento estágio 2 — sem líder no setor; responsável ${task.assignee.name} notificado sobre a tarefa "${task.title}"`,
+      },
+    });
+    return true;
+  });
+}
+
+// Estágio 3: transfere ao Líder I (se houver; senão mantém), marca slaEscalated,
+// notifica responsável anterior + líder + iniciador. Retorna o novo assigneeId
+// quando houve transferência (para o evento de workflow). Idempotente via guarda
+// escalationStage < 3.
+async function applyStage3(task: EscalationTask): Promise<{ applied: boolean; newAssigneeId: string | null }> {
+  const leader = await resolveStepLeader(task.step.handlingSectorId);
+  const newAssigneeId = leader ? leader.id : task.assigneeId;
+  const applied = await prisma.$transaction(async (tx) => {
+    const upd = await tx.requestTask.updateMany({
+      where: { id: task.id, escalationStage: { lt: 3 } },
+      data: { escalationStage: 3, slaEscalated: true, assigneeId: newAssigneeId },
+    });
+    if (upd.count === 0) return false;
+    await tx.auditLog.create({
+      data: {
+        requestId: task.requestId, userId: 'system', userName: 'Sistema',
+        action: 'ESCALATION_STAGE_3',
+        details: leader
+          ? `Escalonamento estágio 3 — tarefa "${task.title}" transferida ao líder ${leader.name}`
+          : `Escalonamento estágio 3 — tarefa "${task.title}" mantida com ${task.assignee.name} (sem líder no setor)`,
+      },
+    });
+    // Notifica responsável anterior, líder (se houver) e iniciador.
+    const recipients = [task.assigneeId, task.request.initiator.id];
+    if (leader) recipients.push(leader.id);
+    await notifyMany(tx, recipients, {
+      type: 'TASK_ESCALATED_TO_LEADER',
+      title: 'Tarefa escalonada — transferida',
+      body: leader
+        ? `A tarefa "${task.title}" em "${task.request.title}" foi transferida ao líder ${leader.name} por atraso prolongado.`
+        : `A tarefa "${task.title}" em "${task.request.title}" segue em atraso prolongado (sem líder no setor).`,
+      requestId: task.requestId,
+    });
+    return true;
+  });
+  return { applied, newAssigneeId: applied && leader ? newAssigneeId : null };
+}
+
+// Varre as tarefas elegíveis e dispara o estágio mais severo ainda não disparado.
+// `now` é injetável para tornar os testes determinísticos (sem timers reais).
+// Retorna a quantidade de tarefas que tiveram algum estágio aplicado.
+export async function processEscalations(now: Date = new Date()): Promise<number> {
+  const tasks = (await prisma.requestTask.findMany({
+    where: {
+      status: { in: ['PENDING', 'IN_PROGRESS'] },
+      slaEscalated: false,
+    },
+    select: {
+      id: true,
+      requestId: true,
+      title: true,
+      assigneeId: true,
+      escalationStage: true,
+      delayJustification: true,
+      createdAt: true,
+      assignee: { select: { id: true, name: true } },
+      request: { select: { id: true, title: true, initiator: { select: { id: true, name: true } } } },
+      step: {
+        select: { escalationDay1: true, escalationDay2: true, escalationDay3: true, handlingSectorId: true },
+      },
+    },
+  })) as (EscalationTask & { createdAt: Date })[];
+
+  let processed = 0;
+
+  for (const task of tasks) {
+    const ageDays = (now.getTime() - task.createdAt.getTime()) / DIA_MS;
+    const d1 = task.step.escalationDay1 ?? DEFAULT_ESCALATION_DAYS.d1;
+    const d2 = task.step.escalationDay2 ?? DEFAULT_ESCALATION_DAYS.d2;
+    const d3 = task.step.escalationDay3 ?? DEFAULT_ESCALATION_DAYS.d3;
+
+    // Dispara o estágio MAIS SEVERO ainda não disparado (um por execução).
+    if (ageDays >= d3 && task.escalationStage < 3) {
+      const { applied, newAssigneeId } = await applyStage3(task);
+      if (applied) {
+        await publishWorkflowEvent('TASK_ESCALATED', task.requestId, { stage: 3, newAssigneeId });
+        processed++;
+      }
+    } else if (ageDays >= d2 && task.escalationStage < 2) {
+      if (await applyStage2(task)) processed++;
+    } else if (ageDays >= d1 && task.escalationStage < 1) {
+      if (await applyStage1(task)) processed++;
+    }
+  }
+
+  return processed;
 }
 
 // Avança a solicitação para a próxima etapa (ou conclui) de forma atômica.

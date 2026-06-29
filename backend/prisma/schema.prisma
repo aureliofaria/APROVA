@@ -40,6 +40,10 @@ model User {
 
   // Checklist
   checklistItemsChecked RequestChecklistItem[]
+
+  // Escalonamento temporal (Fase 0 · Passo 11): tarefas cuja justificativa de
+  // atraso foi registrada por este usuário.
+  delayJustifications RequestTask[] @relation("TaskDelayJustifier")
 }
 
 model Department {
@@ -129,6 +133,11 @@ model FlowStep {
   collectsResources  Boolean              @default(false)
   // Fase 0 · Passo 10: rótulo humano de exibição quando a solicitação está nesta etapa.
   statusLabel        String?
+  // Fase 0 · Passo 11: overrides opcionais da cadência de escalonamento (em dias
+  // desde a criação da tarefa). Nulo → usa o padrão fixo 2/3/7.
+  escalationDay1     Int?
+  escalationDay2     Int?
+  escalationDay3     Int?
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   formFields         FormField[]
@@ -294,6 +303,14 @@ model RequestTask {
   completedAt  DateTime?
   notes        String?
   slaEscalated Boolean      @default(false)
+  // Escalonamento temporal (Fase 0 · Passo 11): estágio mais severo já disparado
+  // (0 = nenhum, 1 = lembrete ao responsável, 2 = líder, 3 = transferência).
+  escalationStage    Int       @default(0)
+  // Justificativa de atraso registrada pelo responsável (ou ADMIN).
+  delayJustification String?
+  delayJustifiedAt   DateTime?
+  delayJustifiedById String?
+  delayJustifiedBy   User?     @relation("TaskDelayJustifier", fields: [delayJustifiedById], references: [id], onDelete: SetNull)
   attachments  Attachment[]
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt

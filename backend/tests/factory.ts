@@ -57,6 +57,13 @@ interface StepSpec {
   activateOnSectorId?: string | null;
   // Fase 0 · Passo 10: rótulo de exibição opcional para a etapa.
   statusLabel?: string | null;
+  // Fase 0 · Passo 11: setor que trata a etapa (resolução do Líder I) e overrides
+  // opcionais da cadência de escalonamento.
+  handlingSectorId?: string | null;
+  slaExpiry?: string;
+  escalationDay1?: number | null;
+  escalationDay2?: number | null;
+  escalationDay3?: number | null;
 }
 
 // Cria um FlowTemplate com etapas (e níveis de alçada) e retorna o template.
@@ -72,6 +79,11 @@ export async function makeFlow(type: string, steps: StepSpec[]) {
         conditions: s.conditions ? JSON.stringify(s.conditions) : null,
         activateOnSectorId: s.activateOnSectorId ?? null,
         statusLabel: s.statusLabel ?? null,
+        handlingSectorId: s.handlingSectorId ?? null,
+        slaExpiry: s.slaExpiry ?? undefined,
+        escalationDay1: s.escalationDay1 ?? null,
+        escalationDay2: s.escalationDay2 ?? null,
+        escalationDay3: s.escalationDay3 ?? null,
       },
     });
     for (const lvl of s.authLevels ?? []) {

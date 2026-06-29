@@ -16,6 +16,7 @@ import inventoryRouter from './routes/inventory';
 import reportsRouter from './routes/reports';
 import auditLogsRouter from './routes/audit-logs';
 import notificationsRouter from './routes/notifications';
+import { processEscalations } from './services/workflow';
 
 const app = express();
 const PORT = config.port;
@@ -74,5 +75,13 @@ if (process.env.SERVE_FRONTEND === 'true') {
 // em testes (supertest) sem abrir uma porta.
 if (require.main === module) {
   app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
+
+  // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
+  // quando o módulo é executado diretamente — sob teste o `app` é importado
+  // (require.main !== module), então o timer NÃO inicia.
+  setInterval(
+    () => processEscalations().catch((e) => console.error('[escalation]', e)),
+    Number(process.env.ESCALATION_INTERVAL_MS) || 600000
+  );
 }
 export default app;

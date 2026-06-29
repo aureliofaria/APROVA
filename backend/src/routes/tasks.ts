@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, handleUpload } from '../middleware/upload';
-import { advanceRequest, processSlaExpiries, publishWorkflowEvent } from '../services/workflow';
+import { advanceRequest, processSlaExpiries, processEscalations, publishWorkflowEvent } from '../services/workflow';
 import { notify } from '../services/notifications';
 import { isFunctionRole } from '../lib/queue';
 import { checklistUnmet } from '../lib/checklist';
@@ -13,6 +13,8 @@ router.get('/my', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     // Auto-process any expired SLAs before returning tasks
     processSlaExpiries().catch(() => {});
+    // Escalonamento temporal (Passo 11): dispara estágios elegíveis em background.
+    processEscalations().catch(() => {});
 
     const tasks = await prisma.requestTask.findMany({
       // Não polui a lista com tarefas de fila que outro colega assumiu (irmãs
@@ -349,6 +351,44 @@ router.post('/:id/attachments', authenticate, handleUpload(upload.array('files',
     res.status(201).json(attachments);
   } catch {
     res.status(500).json({ error: 'Erro ao fazer upload' });
+  }
+});
+
+// Justificativa de atraso (Fase 0 · Passo 11). O responsável (ou ADMIN) registra
+// o motivo do atraso; o texto é incorporado às notificações de escalonamento.
+// Não exige que a tarefa esteja efetivamente atrasada — o responsável pode
+// justificar proativamente.
+router.post('/:id/justify-delay', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const owned = await loadOwnedTask(req, res);
+    if (!owned) return;
+    const justification = typeof req.body?.justification === 'string' ? req.body.justification.trim() : '';
+    if (!justification) {
+      res.status(400).json({ error: 'A justificativa é obrigatória' }); return;
+    }
+    const task = await prisma.$transaction(async (tx) => {
+      const t = await tx.requestTask.update({
+        where: { id: req.params.id },
+        data: {
+          delayJustification: justification,
+          delayJustifiedAt: new Date(),
+          delayJustifiedById: req.user.id,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          requestId: t.requestId,
+          userId: req.user.id,
+          userName: req.user.name,
+          action: 'DELAY_JUSTIFIED',
+          details: `Justificativa de atraso registrada na tarefa "${t.title}": ${justification}`,
+        },
+      });
+      return t;
+    });
+    res.json(task);
+  } catch {
+    res.status(500).json({ error: 'Erro ao registrar justificativa' });
   }
 });
 
