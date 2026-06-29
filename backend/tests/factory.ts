@@ -55,6 +55,8 @@ interface StepSpec {
   conditions?: unknown;
   authLevels?: { name: string; minValueCents?: number | null; maxValueCents?: number | null; requiredApprovers: number; approverRole: string }[];
   activateOnSectorId?: string | null;
+  // Fase 0 · Passo 10: rótulo de exibição opcional para a etapa.
+  statusLabel?: string | null;
 }
 
 // Cria um FlowTemplate com etapas (e níveis de alçada) e retorna o template.
@@ -69,6 +71,7 @@ export async function makeFlow(type: string, steps: StepSpec[]) {
         requiredRole: s.requiredRole ?? null,
         conditions: s.conditions ? JSON.stringify(s.conditions) : null,
         activateOnSectorId: s.activateOnSectorId ?? null,
+        statusLabel: s.statusLabel ?? null,
       },
     });
     for (const lvl of s.authLevels ?? []) {

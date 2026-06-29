@@ -91,7 +91,7 @@ router.delete('/:id', authenticate, requireRole('ADMIN'), async (req: AuthReques
 router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
     const { name, description, requiredRole, requiresAttachment, deadlineHours, slaExpiry, order,
-            handlingSectorId, conditions, activateOnSectorId, collectsResources } = req.body;
+            handlingSectorId, conditions, activateOnSectorId, collectsResources, statusLabel } = req.body;
     const maxOrder = await prisma.flowStep.aggregate({ where: { flowTemplateId: req.params.id }, _max: { order: true } });
     const nextOrder = order ?? ((maxOrder._max.order ?? -1) + 1);
     const step = await prisma.flowStep.create({
@@ -103,6 +103,8 @@ router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRe
         activateOnSectorId: activateOnSectorId || null,
         collectsResources: collectsResources ?? false,
         order: nextOrder, handlingSectorId: handlingSectorId || null,
+        // Fase 0 · Passo 10: rótulo humano de exibição para esta etapa (opcional).
+        statusLabel: (typeof statusLabel === 'string' && statusLabel.trim()) ? statusLabel.trim() : null,
       },
       include: {
         handlingSector: { select: { id: true, name: true } },
@@ -118,7 +120,14 @@ router.post('/:id/steps', authenticate, requireRole('ADMIN'), async (req: AuthRe
 router.put('/:id/steps/:stepId', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res: Response) => {
   try {
     const { name, description, requiredRole, requiresAttachment, deadlineHours, slaExpiry, order,
-            handlingSectorId, conditions, activateOnSectorId, collectsResources } = req.body;
+            handlingSectorId, conditions, activateOnSectorId, collectsResources, statusLabel } = req.body;
+    // statusLabel: null explícito limpa o rótulo; string não-vazia atualiza; ausente mantém.
+    const statusLabelData: { statusLabel?: string | null } = {};
+    if ('statusLabel' in req.body) {
+      statusLabelData.statusLabel = (typeof statusLabel === 'string' && statusLabel.trim())
+        ? statusLabel.trim()
+        : null;
+    }
     const step = await prisma.flowStep.update({
       where: { id: req.params.stepId },
       data: {
@@ -128,6 +137,7 @@ router.put('/:id/steps/:stepId', authenticate, requireRole('ADMIN'), async (req:
         activateOnSectorId: activateOnSectorId || null,
         collectsResources: collectsResources ?? false,
         order, handlingSectorId: handlingSectorId || null,
+        ...statusLabelData,
       },
       include: {
         handlingSector: { select: { id: true, name: true } },

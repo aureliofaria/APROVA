@@ -212,6 +212,14 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     // "solicitação fantasma" (criada mas sem tarefas/protocolo) se algo falhar
     // no meio. createRequestTasks aceita o cliente de transação.
     const request = await prisma.$transaction(async (tx) => {
+      // Fase 0 · Passo 10: busca o statusLabel da etapa 0 ANTES de criar a Request
+      // para incluir já na INSERT (não requer UPDATE separado).
+      const step0 = await tx.flowStep.findFirst({
+        where: { flowTemplateId: flowId, order: 0 },
+        select: { statusLabel: true },
+      });
+      const initialStatusLabel = step0?.statusLabel ?? null;
+
       const created = await tx.request.create({
         data: {
           flowId,
@@ -230,6 +238,8 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
           vacancyType: vacancyType || null,
           replacementName: replacementName || null,
           parentRequestId: resolvedParentId,
+          // Fase 0 · Passo 10: rótulo denormalizado da etapa inicial.
+          statusLabel: initialStatusLabel,
         },
       });
 

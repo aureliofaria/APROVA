@@ -127,6 +127,8 @@ model FlowStep {
   activateOnSectorId String?
   activateOnSector   Sector?              @relation("StepActivationSector", fields: [activateOnSectorId], references: [id])
   collectsResources  Boolean              @default(false)
+  // Fase 0 · Passo 10: rótulo humano de exibição quando a solicitação está nesta etapa.
+  statusLabel        String?
   authLevels         AuthorizationLevel[]
   tasks              RequestTask[]
   formFields         FormField[]
@@ -216,6 +218,10 @@ model Request {
   parentRequestId  String?
   parent           Request?          @relation("RequestParentChild", fields: [parentRequestId], references: [id], onDelete: SetNull)
   children         Request[]         @relation("RequestParentChild")
+  // Fase 0 · Passo 10: rótulo de exibição DENORMALIZADO da etapa corrente.
+  // Espelha FlowStep.statusLabel da etapa atual para leitura eficiente na lista
+  // (sem joins). Atualizado na criação e no avanço de etapa; zerado na conclusão.
+  statusLabel      String?
   tasks            RequestTask[]
   resources        RequestResource[]
   attachments      Attachment[]

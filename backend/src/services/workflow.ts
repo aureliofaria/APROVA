@@ -339,17 +339,23 @@ export async function advanceRequest(requestId: string) {
     const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
 
     if (hasNextStep) {
+      // Fase 0 · Passo 10: busca o statusLabel da próxima etapa para denormalizar.
+      const nextStep = request.flow.steps.find(s => s.order === nextStepOrder!);
+      const nextStatusLabel = (nextStep as any)?.statusLabel ?? null;
+
       const upd = await tx.request.updateMany({
         where: { id: requestId, currentStep: request.currentStep },
-        data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS' },
+        data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS', statusLabel: nextStatusLabel },
       });
       if (upd.count === 0) return; // outra execução já avançou esta etapa
       await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
       await applyResourceTransitions(request, request.currentStep, false, tx);
     } else {
+      // Fase 0 · Passo 10: ao concluir, zeramos o statusLabel — o status de máquina
+      // COMPLETED já comunica o estado; manter um rótulo de etapa seria enganoso.
       const upd = await tx.request.updateMany({
         where: { id: requestId, currentStep: request.currentStep, status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] } },
-        data: { status: 'COMPLETED' },
+        data: { status: 'COMPLETED', statusLabel: null },
       });
       if (upd.count === 0) return;
       await applyResourceTransitions(request, request.currentStep, true, tx);
