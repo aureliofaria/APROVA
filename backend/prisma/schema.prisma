@@ -615,3 +615,23 @@ model FinanceParamAuditLog {
   @@index([sectorId])
   @@index([userId])
 }
+
+// Trilha PERSISTENTE da concessão/revogação de suplência do Líder I (Fase 0 ·
+// Passo 13). Transferência de autoridade precisa de auditoria consultável. O
+// AuditLog principal exige requestId (FK), então usamos tabela dedicada — mesmo
+// padrão do FinanceParamAuditLog.
+model DelegationAuditLog {
+  id               String    @id @default(cuid())
+  sectorId         String
+  lider1MemberId   String
+  delegateMemberId String?
+  delegateUserId   String?
+  action           String // DELEGATION_SET | DELEGATION_CLEARED
+  until            DateTime?
+  byUserId         String
+  byUserName       String
+  createdAt        DateTime  @default(now())
+
+  @@index([sectorId])
+  @@index([byUserId])
+}

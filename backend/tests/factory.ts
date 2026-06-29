@@ -38,6 +38,7 @@ export async function resetDb() {
   // (FinanceParam.sectorId → Sector com onDelete: Cascade; auditoria é independente).
   await prisma.financeParamAuditLog.deleteMany();
   await prisma.financeParam.deleteMany();
+  await prisma.delegationAuditLog.deleteMany();
   await prisma.sectorMember.deleteMany();
   await prisma.request.deleteMany();
   await prisma.user.deleteMany();

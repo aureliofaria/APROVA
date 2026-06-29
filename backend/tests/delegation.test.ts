@@ -51,6 +51,28 @@ describe('Suplência/delegação do Líder I (Fase 0 · Passo 13)', () => {
       expect(row?.delegateUntil).not.toBeNull();
     });
 
+    it('concessão e revogação gravam trilha PERSISTENTE em DelegationAuditLog', async () => {
+      const l1u = await makeUser('USER');
+      const l2u = await makeUser('USER');
+      const sector = await makeSector('Comercial');
+      const l1 = await addMember(sector.id, l1u.id, 'LIDER_1');
+      const l2 = await addMember(sector.id, l2u.id, 'LIDER_2', l1.id);
+
+      await request(app).put(`/api/sectors/${sector.id}/delegation`)
+        .set(auth(tokenFor(l1u.id))).send({ delegateUserId: l2u.id, until: future() });
+      const setLog = await prisma.delegationAuditLog.findFirst({ where: { sectorId: sector.id, action: 'DELEGATION_SET' } });
+      expect(setLog).toBeTruthy();
+      expect(setLog?.delegateMemberId).toBe(l2.id);
+      expect(setLog?.delegateUserId).toBe(l2u.id);
+      expect(setLog?.byUserId).toBe(l1u.id);
+      expect(setLog?.until).not.toBeNull();
+
+      await request(app).delete(`/api/sectors/${sector.id}/delegation`).set(auth(tokenFor(l1u.id)));
+      const clearLog = await prisma.delegationAuditLog.findFirst({ where: { sectorId: sector.id, action: 'DELEGATION_CLEARED' } });
+      expect(clearLog).toBeTruthy();
+      expect(clearLog?.byUserId).toBe(l1u.id);
+    });
+
     it('PUT por ADMIN → 200', async () => {
       const admin = await makeUser('ADMIN');
       const l1u = await makeUser('USER');

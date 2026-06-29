@@ -183,11 +183,11 @@ router.put('/:id/members/:memberId', authenticate, requireRole('ADMIN'), async (
 // A visibilidade por suplência (lib/visibility.ts) e o gate financeiro
 // (lib/financeParams.ts) consomem esses campos enquanto delegateUntil > agora.
 //
-// Auditoria: AuditLog exige requestId (FK obrigatória) e a delegação não tem
-// Request associado; criar tabela nova só para isto foi descartado (orientação
-// do passo). Registramos uma trilha estruturada via console.info (DELEGATION_SET
-// / DELEGATION_CLEARED) com userId/setor/suplente/prazo. A resposta devolve o
-// estado da delegação para confirmação.
+// Auditoria: como transfere AUTORIDADE (financeira, etc.), a concessão/revogação
+// é registrada de forma PERSISTENTE e consultável em DelegationAuditLog
+// (DELEGATION_SET / DELEGATION_CLEARED) com quem delegou, suplente e prazo. O
+// AuditLog principal exige requestId (FK), por isso a tabela dedicada (mesmo
+// padrão do FinanceParamAuditLog). A resposta devolve o estado da delegação.
 //
 // FOLLOW-UP (extensão futura, NÃO implementado aqui): a suplência ainda não
 // redireciona o ESCALONAMENTO temporal (Passo 11 escala ao titular LIDER_1) nem
@@ -240,12 +240,14 @@ router.put('/:sectorId/delegation', authenticate, async (req: AuthRequest, res: 
       select: { id: true, sectorId: true, delegateToId: true, delegateUntil: true },
     });
 
-    // Trilha de auditoria estruturada (sem requestId — ver nota acima).
-    console.info('[AUDIT] DELEGATION_SET', JSON.stringify({
-      action: 'DELEGATION_SET', sectorId, lider1MemberId: lider1.id,
-      delegateMemberId: suplente.id, delegateUserId, until: untilDate.toISOString(),
-      byUserId: req.user!.id, at: new Date().toISOString(),
-    }));
+    // Trilha PERSISTENTE da concessão (autoridade transferida → auditável).
+    await prisma.delegationAuditLog.create({
+      data: {
+        sectorId, lider1MemberId: lider1.id, delegateMemberId: suplente.id,
+        delegateUserId, action: 'DELEGATION_SET', until: untilDate,
+        byUserId: req.user!.id, byUserName: req.user!.name,
+      },
+    });
 
     res.json({ sectorId: updated.sectorId, delegateToId: updated.delegateToId, delegateUntil: updated.delegateUntil });
   } catch {
@@ -267,10 +269,12 @@ router.delete('/:sectorId/delegation', authenticate, async (req: AuthRequest, re
       select: { sectorId: true, delegateToId: true, delegateUntil: true },
     });
 
-    console.info('[AUDIT] DELEGATION_CLEARED', JSON.stringify({
-      action: 'DELEGATION_CLEARED', sectorId, lider1MemberId: lider1.id,
-      byUserId: req.user!.id, at: new Date().toISOString(),
-    }));
+    await prisma.delegationAuditLog.create({
+      data: {
+        sectorId, lider1MemberId: lider1.id, action: 'DELEGATION_CLEARED',
+        byUserId: req.user!.id, byUserName: req.user!.name,
+      },
+    });
 
     res.json({ sectorId: updated.sectorId, delegateToId: updated.delegateToId, delegateUntil: updated.delegateUntil });
   } catch {
