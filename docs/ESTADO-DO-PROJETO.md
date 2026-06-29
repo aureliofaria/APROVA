@@ -5,7 +5,7 @@
 > `PAGAMENTOS.md`, `PAGAMENTOS-SECURITY.md`, `DEPLOY.md`.
 
 ## 1. O que é o APROVA
-Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, compra, pagamento) para a Gol Plus. Web, servido em processo único (backend Express serve o frontend React; SQLite via Prisma). Nome do produto: **APROVA** — nenhuma alusão a "SGA" (sistema legado abandonado).
+Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, compra, pagamento) para a Gol Plus. Web, servido em processo único (backend Express serve o frontend React; SQLite via Prisma). Nome do produto: **APROVA** — nenhuma alusão a "SGA" (sistema legado abandonado). Repositório: **`aureliofaria/APROVA`**.
 **Restrição arquitetural:** construir com contratos de API limpos e baixo acoplamento, deixando costuras prontas para futuro acoplamento com o ERP **Sankhya**.
 
 ## 2. Estrutura do time (IA) e governança
@@ -18,10 +18,10 @@ Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, 
 - **Calibragem real:** seto o *modelo* por agente; "esforço" é aproximado via rigor de briefing + verificação + tier do modelo. Custo: mais tokens — dimensionar para não desperdiçar.
 
 ## 3. Branches, PRs e o que contêm
-- **`claude/deploy-v1-2g02g7`** → PR **#8** (base→main). Pacote de deploy (DEPLOY.md, launcher de 1 clique, seed prod seguro), **rebrand APROVA completo**, e a **correção anti-IDOR base** (`21d7579`: guardas + upload 400). HEAD ~`21d7579`.
-- **`claude/pagador-fluxo-pagamentos`** → PR **#9**. Fluxo de pagamentos: categorias, recorrência, alçada, **endurecimento de segurança**, frontend de pagamentos, agendador in-process, gancho `FinanceParams`. HEAD `fe27e71`. **79/79 testes, e2e 52/52.**
-- **`claude/fase0-organizacao`** → PR **#10** (base→deploy-v1). Fase 0 **COMPLETA (13/13)** + **Fase 1 espinha dorsal** (trilha onboarding 1→11, config-only). **266 testes, smoke e2e 35/35, e2e-onboarding 22/22 (ponta a ponta).**
-- Branch de tarefa do designado é mesclada (ff) na branch da fase pelo Maestro após verificação.
+- **`main`** = fonte de verdade do go-live. **V1 do APROVA mesclado** (merge `20d47c8`): Fase 0 + Fase 1 (trilha) + identidade Gol Plus + pacote de deploy. `tsc` limpo, **267 testes**, smoke e2e 35/35.
+- **PR #10** (`claude/fase0-organizacao` → deploy-v1) — **MESCLADO** (`4fe607c`). Fase 0 **COMPLETA (13/13)** + **Fase 1 espinha dorsal** (trilha onboarding 1→11, config-only) + **frontend com identidade Gol Plus** (logo oficial horizontal/fundo-azul/vertical, cores #13294B/#ff6413, layout responsivo).
+- **PR #8** (`claude/deploy-v1-2g02g7` → main) — **MESCLADO** (`20d47c8`). Pacote de deploy (DEPLOY.md, seed prod seguro), anti-IDOR base, rebrand APROVA. Conflito com a `main` (deploy via PR #7) resolvido a favor da versão APROVA (`@aprova.com`, setores Fase 0).
+- **`claude/pagador-fluxo-pagamentos`** → PR **#9** (ABERTO, não mesclado). Fluxo de pagamentos: categorias, recorrência, alçada, **endurecimento de segurança**, frontend de pagamentos, agendador in-process, gancho `FinanceParams`. HEAD `fe27e71`. **79/79 testes, e2e 52/52.** *Precisa rebase sobre a `main` atual antes do merge.*
 
 ## 4. Decisões de negócio confirmadas (CEO)
 - **Trilha de admissão/onboarding 1→11** validada (ver diagrama/artifact e SPEC). Subfluxo de compra vinculado; **UX: mesma aba com retorno + protocolo automático**.
@@ -47,7 +47,7 @@ Sistema de gestão de aprovações e fluxos (admissão/onboarding, offboarding, 
 - Pagamentos: matriz de 40+ casos (IDOR, alçada/centavos, replay/concorrência, JWT, anexos) — ver PAGAMENTOS-SECURITY.md (na branch do Pagador).
 
 ## 7. Pendências do CEO (não bloqueiam o build)
-- **Renomear o repositório** no GitHub: `aureliofaria/sga` → `aprova` (Settings) e a **descrição** "SGA TEST". Não consigo via API.
+- ✅ **Repositório renomeado** para **`aureliofaria/APROVA`** (descrição "APROVA workflow"). Rebrand 100% concluído (código + repo). GitHub redireciona o nome antigo, então remotes/PRs seguem válidos.
 - Excluir branches antigas obsoletas pela UI.
 - (Opcional) confirmar assunções residuais do SPEC Parte V (mascaramento por campo já encaminhado; importação em massa de setores na implantação).
 
