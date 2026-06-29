@@ -73,7 +73,7 @@ describe('statusLabel — rótulo de exibição por etapa (Fase 0 · Passo 10)',
     const res = await request(app)
       .post('/api/requests')
       .set(auth(tokenFor(iniciador.id)))
-      .send({ flowId: flow.id, title: 'Pedido sem rótulo' });
+      .send({ flowId: flow.id, title: 'Pedido sem rótulo', paymentCategory: 'COMPRA', amountCents: 100000, supplier: 'Fornecedor', costCenter: 'CC-1', justification: 'teste' });
 
     expect(res.status).toBe(201);
     expect(res.body.statusLabel).toBeNull();
@@ -256,7 +256,7 @@ describe('statusLabel — rótulo de exibição por etapa (Fase 0 · Passo 10)',
     const res = await request(app)
       .post('/api/requests')
       .set(auth(tokenFor(iniciador.id)))
-      .send({ flowId: flow.id, title: 'Para rejeitar' });
+      .send({ flowId: flow.id, title: 'Para rejeitar', paymentCategory: 'COMPRA', amountCents: 100000, supplier: 'Fornecedor', costCenter: 'CC-1', justification: 'teste' });
 
     expect(res.status).toBe(201);
     const reqId = res.body.id;

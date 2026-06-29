@@ -10,6 +10,7 @@ import departmentsRouter from './routes/departments';
 import sectorsRouter from './routes/sectors';
 import flowsRouter from './routes/flows';
 import requestsRouter from './routes/requests';
+import paymentsRouter from './routes/payments';
 import tasksRouter from './routes/tasks';
 import resourcesRouter from './routes/resources';
 import inventoryRouter from './routes/inventory';
@@ -53,6 +54,7 @@ app.use('/api/departments', departmentsRouter);
 app.use('/api/sectors', sectorsRouter);
 app.use('/api/flows', flowsRouter);
 app.use('/api/requests', requestsRouter);
+app.use('/api/payments', paymentsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/resources', resourcesRouter);
 app.use('/api/inventory', inventoryRouter);
@@ -73,22 +75,14 @@ if (process.env.SERVE_FRONTEND === 'true') {
   });
 }
 
-// Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
-// próprio backend serve o build do frontend, deixando tudo na MESMA origem
-// (http://<ip>:porta) — sem necessidade de nginx. Mantém /api e /uploads
-// intactos (já registrados acima) e faz fallback de SPA para as demais rotas.
-if (process.env.SERVE_FRONTEND === 'true') {
-  const frontendDist = path.resolve(__dirname, '../../frontend/dist');
-  app.use(express.static(frontendDist));
-  app.get(/^\/(?!api\/|uploads\/).*/, (_req, res) => {
-    res.sendFile(path.join(frontendDist, 'index.html'));
-  });
-}
-
 // Só inicia o servidor quando executado diretamente — permite importar `app`
 // em testes (supertest) sem abrir uma porta.
 if (require.main === module) {
   app.listen(PORT, () => console.log(`APROVA API rodando na porta ${PORT}`));
+  // Agendador in-process de recorrências de pagamento (idempotente).
+  // Ligado apenas via PAYMENTS_SCHEDULER_ENABLED=true; nunca em testes.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('./services/scheduler').startPaymentsScheduler();
 
   // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
   // quando o módulo é executado diretamente — sob teste o `app` é importado

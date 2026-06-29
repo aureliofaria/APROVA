@@ -41,8 +41,17 @@ JWT_SECRET=<gere com: openssl rand -hex 32>
 DATABASE_URL="file:./dev.db"
 SERVE_FRONTEND=true            # backend serve o frontend (processo único)
 NOTIFICATIONS_EXTERNAL_ENABLED=false
+
+# Pagamentos recorrentes (agendador in-process). Desligado por padrão.
+# Quando ligado, gera periodicamente as solicitações de pagamento das
+# recorrências vencidas (idempotente — não duplica no mesmo período).
+PAYMENTS_SCHEDULER_ENABLED=true        # 'true' liga; qualquer outro valor mantém desligado
+PAYMENTS_SCHEDULER_INTERVAL_MS=3600000 # cadência em ms (default 1h; piso 1min)
 ```
 > `JWT_SECRET` é **obrigatório** em produção — a aplicação não sobe sem ele.
+> Mesmo com o agendador desligado, é possível gerar manualmente via
+> `POST /api/payments/recurrences/run` (ADMIN/FINANCE) ou pelo botão
+> "Gerar vencidas agora" na tela de Recorrências.
 
 ## 4. Instalar, migrar e compilar
 ```bash

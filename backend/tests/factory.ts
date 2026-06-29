@@ -28,6 +28,7 @@ export async function resetDb() {
   await prisma.requestFieldValue.deleteMany();
   await prisma.requestChecklistItem.deleteMany();
   await prisma.request.deleteMany();
+  await prisma.paymentRecurrence.deleteMany();
   await prisma.authorizationLevel.deleteMany();
   await prisma.formField.deleteMany();
   await prisma.checklistItem.deleteMany();

@@ -8,6 +8,7 @@ import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
 import { notify, notifyMany } from '../services/notifications';
 import { parseCents } from '../lib/money';
+import { validatePaymentRequest, isPaymentCategory } from '../lib/payments';
 import { buildRequestWhere, canViewRequest } from '../lib/visibility';
 import {
   SensitiveType,
@@ -168,7 +169,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { flowId, title, description, targetEmployee, targetDepartment, startDate,
             amountCents, supplier, costCenter, justification, vacancyType, replacementName,
-            resourceIds, parentRequestId } = req.body;
+            paymentCategory, resourceIds, parentRequestId } = req.body;
     if (!flowId || !title) { res.status(400).json({ error: 'Fluxo e título são obrigatórios' }); return; }
     const amount = parseCents(amountCents);
     if (!amount.ok) { res.status(400).json({ error: 'Valor (amountCents) inválido' }); return; }
@@ -179,6 +180,19 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
     if (!canOpenRequestType(req.user, flow.type)) {
       res.status(403).json({ error: 'Você não tem permissão para abrir este tipo de solicitação' });
       return;
+    }
+
+    // Regras específicas de PAGAMENTO: categoria + campos obrigatórios + valor.
+    // Os anexos exigidos são cobrados ao concluir a etapa de solicitação.
+    let normalizedCategory: string | null = null;
+    if (flow.type === 'PAYMENT') {
+      const paymentError = validatePaymentRequest({
+        paymentCategory, amountCents: amount.value, costCenter, justification, supplier,
+      });
+      if (paymentError) { res.status(400).json({ error: paymentError }); return; }
+      normalizedCategory = paymentCategory;
+    } else if (isPaymentCategory(paymentCategory)) {
+      normalizedCategory = paymentCategory;
     }
 
     // Subfluxo: verifica o pai se informado (Fase 0 · Passo 9).
@@ -235,6 +249,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
           supplier,
           costCenter,
           justification,
+          paymentCategory: normalizedCategory,
           vacancyType: vacancyType || null,
           replacementName: replacementName || null,
           parentRequestId: resolvedParentId,
@@ -890,7 +905,7 @@ router.post('/:id/attachments', authenticate, handleUpload(upload.array('files',
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) { res.status(400).json({ error: 'Nenhum arquivo enviado' }); return; }
-
+    // IDOR: só envolvidos podem anexar a uma solicitação.
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     if (!(await canViewRequest(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }

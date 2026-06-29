@@ -108,6 +108,19 @@ export async function createRequestTasks(requestId: string, flowId: string, step
     if (isSelfSubmissionStep) {
       // Submissão do iniciador: só o iniciador, sem difundir ao papel inteiro.
       if (initiator) assignees = [initiator];
+    } else if (hasAuthLevels) {
+      // Etapa de DECISÃO/ALÇADA: aprovadores elegíveis = requiredRole ∪ os
+      // approverRole das faixas de alçada, SEMPRE excluindo o iniciador (SoD).
+      // SEM fallback ao iniciador — se ninguém tem alçada, a etapa fica PENDENTE
+      // e cabe ao ADMIN intervir; o solicitante jamais decide o próprio pedido.
+      const roles = Array.from(new Set([
+        ...(step.requiredRole ? [step.requiredRole] : []),
+        ...step.authLevels.map((l) => l.approverRole),
+      ]));
+      assignees = await db.user.findMany({
+        where: { role: { in: roles }, isActive: true, id: { not: request.initiatorId } },
+        select: { id: true, name: true },
+      });
     } else if (isFunctionStep) {
       // Fila de função: já inclui fallback hierárquico e fallback ao iniciador.
       assignees = await resolveQueueEligibles(db, step, request.initiatorId);

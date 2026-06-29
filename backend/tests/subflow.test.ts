@@ -147,7 +147,7 @@ describe('subfluxo pai↔filho (Fase 0 · Passo 9)', () => {
     const res = await request(app)
       .post('/api/requests')
       .set(auth(tokenFor(usuario.id)))
-      .send({ flowId: flow.id, title: 'Pedido simples' });
+      .send({ flowId: flow.id, title: 'Pedido simples', paymentCategory: 'COMPRA', amountCents: 100000, supplier: 'Fornecedor', costCenter: 'CC-1', justification: 'teste' });
 
     expect(res.status).toBe(201);
     expect(res.body.parentRequestId).toBeNull();
