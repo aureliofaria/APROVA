@@ -59,9 +59,8 @@ export const upload = multer({
 });
 
 // Envolve um middleware de upload do multer, traduzindo seus erros (tipo
-// inválido, tamanho excedido, etc.) em respostas 400 CLARAS — em vez de
-// deixar o erro virar 500 no handler genérico. Mantém o comportamento de
-// sucesso intacto (segue para o próximo handler).
+// inválido, tamanho excedido, etc.) em respostas 400 CLARAS — em vez de deixar
+// o erro virar 500 no handler genérico. Mantém o sucesso intacto.
 export function handleUpload(mw: (req: Request, res: Response, cb: (err: any) => void) => void) {
   return (req: Request, res: Response, next: NextFunction) => {
     mw(req, res, (err: any) => {
