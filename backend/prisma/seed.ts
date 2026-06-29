@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { SECTORS } from '../src/lib/org';
+import { seedOnboardingFlow } from './seedOnboarding';
 
 const prisma = new PrismaClient();
 
@@ -369,6 +370,10 @@ async function main() {
     },
   });
   console.log('Inventário patrimonial criado (almoxarifado + catálogo + ativo de exemplo)');
+
+  // Fase 1 — Trilha de Admissão/Onboarding (config idempotente; NÃO altera o
+  // ONBOARDING antigo, que permanece para compat dos testes/e2e atuais).
+  await seedOnboardingFlow(prisma);
 
   console.log('\nSeed concluído com sucesso!');
   if (isProd) {
