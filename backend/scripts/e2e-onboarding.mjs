@@ -198,8 +198,9 @@ async function main() {
     ],
   });
   // AuditLog SENSITIVE_FIELD_WRITTEN deve ter sido registrado para os campos sensíveis.
-  const auditAfterPii = (await api('GET', `/api/requests/${reqId}/audit`, admin)).data || [];
-  check('AuditLog SENSITIVE_FIELD_WRITTEN registrado na escrita de PII', auditAfterPii.some((a) => a.action === 'SENSITIVE_FIELD_WRITTEN'));
+  const auditResp = await api('GET', `/api/requests/${reqId}/audit`, admin);
+  const auditAfterPii = Array.isArray(auditResp.data) ? auditResp.data : [];
+  check('AuditLog SENSITIVE_FIELD_WRITTEN registrado na escrita de PII', auditAfterPii.some((a) => a.action === 'SENSITIVE_FIELD_WRITTEN'), `(audit status ${auditResp.status})`);
 
   // Viewer TI vê o CPF MASCARADO no GET /:id; RH vê intacto.
   const seenByTi = (await api('GET', `/api/requests/${reqId}`, ti.token)).data;
@@ -257,4 +258,10 @@ function finish() {
   process.exit(fail === 0 ? 0 : 1);
 }
 
-main().catch((e) => { console.error('ERRO FATAL no E2E ONBOARDING:', e); process.exit(2); });
+main().catch((e) => {
+  console.error('ERRO FATAL no E2E ONBOARDING:', e);
+  console.log('\n==== RESULTADO PARCIAL (até o erro) ====');
+  console.log(results.join('\n'));
+  console.log(`\n${pass} passaram, ${fail} falharam (interrompido)`);
+  process.exit(2);
+});

@@ -46,6 +46,35 @@ describe('filas de função — resolução por hierarquia (Passo 6)', () => {
     expect(ids).not.toContain(lider.id);
   });
 
+  // U2b — PRECISÃO POR FUNÇÃO em setor multifunção (TI/DADOS/SISTEMAS no mesmo setor):
+  // a fila da função vai a quem EXERCE a função (user.role), não a todo o setor.
+  it('U2b: setor multifunção — fila da função TI só inclui quem tem papel TI', async () => {
+    const initiator = await makeUser('USER', 'init');
+    const ti = await makeUser('TI', 'tech-ti');
+    const dados = await makeUser('DADOS', 'tech-dados');
+    const sis = await makeUser('SISTEMAS', 'tech-sis');
+    await addMember('TI, Dados e Infra', ti.id, 'MEMBRO');
+    await addMember('TI, Dados e Infra', dados.id, 'MEMBRO');
+    await addMember('TI, Dados e Infra', sis.id, 'MEMBRO');
+
+    expect((await resolveQueueEligibles(prisma, { requiredRole: 'TI' }, initiator.id)).map(e => e.id)).toEqual([ti.id]);
+    expect((await resolveQueueEligibles(prisma, { requiredRole: 'DADOS' }, initiator.id)).map(e => e.id)).toEqual([dados.id]);
+    expect((await resolveQueueEligibles(prisma, { requiredRole: 'SISTEMAS' }, initiator.id)).map(e => e.id)).toEqual([sis.id]);
+  });
+
+  // U2c — fallback preservado: se NINGUÉM no setor exerce a função (papéis genéricos),
+  // a fila recai sobre todos os membros do nível (comportamento original do Passo 6).
+  it('U2c: sem ninguém exercendo a função → fallback para todos os membros do setor', async () => {
+    const initiator = await makeUser('USER', 'init');
+    const a = await makeUser('USER', 'ti-generico-a');
+    const b = await makeUser('USER', 'ti-generico-b');
+    await addMember('TI, Dados e Infra', a.id, 'MEMBRO');
+    await addMember('TI, Dados e Infra', b.id, 'MEMBRO');
+
+    const ids = (await resolveQueueEligibles(prisma, { requiredRole: 'TI' }, initiator.id)).map(e => e.id).sort();
+    expect(ids).toEqual([a.id, b.id].sort());
+  });
+
   // U3 — fallback MEMBRO → LÍDER II
   it('U3: cai para LÍDER II quando não há membro', async () => {
     const initiator = await makeUser('USER', 'init');
