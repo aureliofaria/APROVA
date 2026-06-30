@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { notify, notifyMany } from './notifications';
-import { isFunctionRole, resolveQueueEligibles } from '../lib/queue';
+import { isFunctionRole, isSectorQueueStep, resolveQueueEligibles, resolveSectorEligibles } from '../lib/queue';
 import { decidePaymentRouting } from './financeBudget';
 
 // Aceita tanto o cliente normal quanto um cliente de transação, permitindo que as
@@ -58,7 +58,7 @@ export async function activeRound(db: Db, requestId: string, stepOrder: number):
   return correctionAtMax ? maxRound + 1 : maxRound;
 }
 
-export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma) {
+export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma): Promise<number> {
   const [flow, resources, request] = await Promise.all([
     db.flowTemplate.findUnique({
       where: { id: flowId },
@@ -177,6 +177,9 @@ export async function createRequestTasks(requestId: string, flowId: string, step
     } else if (isFunctionStep) {
       // Fila de função: já inclui fallback hierárquico e fallback ao iniciador.
       assignees = await resolveQueueEligibles(db, step, request.initiatorId);
+    } else if (isSectorQueueStep(step)) {
+      // Chamado genérico: fila do setor de tratamento (Marketing, etc.).
+      assignees = await resolveSectorEligibles(db, step.handlingSectorId!, request.initiatorId);
     } else {
       if (step.requiredRole) {
         assignees = await db.user.findMany({
@@ -207,7 +210,7 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       // Notifica o responsável sobre a nova tarefa (exceto o próprio iniciador).
       // Em etapas de fila, o texto sinaliza que é preciso ASSUMIR para trabalhar.
       if (assignee.id !== request.initiatorId) {
-        const body = isFunctionStep
+        const body = (isFunctionStep || isSectorQueueStep(step))
           ? `Tarefa na fila — assuma para trabalhar em "${request.title}": ${step.name}.`
           : `Você tem uma tarefa em "${request.title}": ${step.name}.`;
         await notify(db, { userId: assignee.id, type: 'TASK_ASSIGNED', title: 'Nova tarefa atribuída', body, requestId });
@@ -225,6 +228,7 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       details: `Etapa ${stepOrder} iniciada (${tasksCreated} tarefa(s) criada(s))`,
     },
   });
+  return tasksCreated;
 }
 
 export async function processSlaExpiries(): Promise<number> {
@@ -607,50 +611,49 @@ export async function advanceRequest(requestId: string) {
     const complete = await isStepComplete(requestId, request.currentStep, tx);
     if (!complete) return;
 
-    // Determine next order via branching conditions or sequential default
-    const currentSteps = request.flow.steps.filter(s => s.order === request.currentStep);
-    const conditionNextOrder = evaluateNextOrder(currentSteps, request);
+    // Avança pelas etapas, PULANDO ordens que não geram tarefa nenhuma (todas as
+    // etapas da ordem foram desativadas por activateOnSectorId — ex.: nenhum ativo
+    // do setor foi solicitado). Sem este laço, o pedido ficaria preso numa ordem
+    // vazia (sem tarefa que dispare o próximo avanço). Guarda contra laço infinito.
+    const allOrders = [...new Set(request.flow.steps.map(s => s.order))].sort((a, b) => a - b);
+    let curOrder = request.currentStep;
+    let guard = 0;
+    while (guard++ <= allOrders.length + 1) {
+      const currentSteps = request.flow.steps.filter(s => s.order === curOrder);
+      const conditionNextOrder = evaluateNextOrder(currentSteps, request);
+      let nextStepOrder: number | null = conditionNextOrder;
+      if (nextStepOrder === null) {
+        const currentIdx = allOrders.indexOf(curOrder);
+        nextStepOrder = currentIdx < allOrders.length - 1 ? allOrders[currentIdx + 1] : null;
+      }
+      const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
 
-    let nextStepOrder: number | null = conditionNextOrder;
-    if (nextStepOrder === null) {
-      const allOrders = [...new Set(request.flow.steps.map(s => s.order))].sort((a, b) => a - b);
-      const currentIdx = allOrders.indexOf(request.currentStep);
-      nextStepOrder = currentIdx < allOrders.length - 1 ? allOrders[currentIdx + 1] : null;
-    }
-
-    const hasNextStep = nextStepOrder !== null && request.flow.steps.some(s => s.order === nextStepOrder);
-
-    if (hasNextStep) {
-      // Fase 0 · Passo 10: busca o statusLabel da próxima etapa para denormalizar.
-      const nextStep = request.flow.steps.find(s => s.order === nextStepOrder!);
-      const nextStatusLabel = (nextStep as any)?.statusLabel ?? null;
-
+      if (hasNextStep) {
+        const nextStep = request.flow.steps.find(s => s.order === nextStepOrder!);
+        const nextStatusLabel = (nextStep as any)?.statusLabel ?? null;
+        const upd = await tx.request.updateMany({
+          where: { id: requestId, currentStep: curOrder },
+          data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS', statusLabel: nextStatusLabel },
+        });
+        if (upd.count === 0) return; // outra execução já avançou esta etapa
+        const created = await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
+        await applyResourceTransitions(request, curOrder, false, tx);
+        if (created > 0) return; // etapa com tarefas: para e aguarda conclusão
+        curOrder = nextStepOrder!; // etapa pulada: segue avançando
+        continue;
+      }
+      // Sem próxima etapa: conclui o pedido.
       const upd = await tx.request.updateMany({
-        where: { id: requestId, currentStep: request.currentStep },
-        data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS', statusLabel: nextStatusLabel },
-      });
-      if (upd.count === 0) return; // outra execução já avançou esta etapa
-      await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
-      await applyResourceTransitions(request, request.currentStep, false, tx);
-    } else {
-      // Fase 0 · Passo 10: ao concluir, zeramos o statusLabel — o status de máquina
-      // COMPLETED já comunica o estado; manter um rótulo de etapa seria enganoso.
-      const upd = await tx.request.updateMany({
-        where: { id: requestId, currentStep: request.currentStep, status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] } },
+        where: { id: requestId, currentStep: curOrder, status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] } },
         data: { status: 'COMPLETED', statusLabel: null },
       });
       if (upd.count === 0) return;
-      await applyResourceTransitions(request, request.currentStep, true, tx);
+      await applyResourceTransitions(request, curOrder, true, tx);
       await tx.auditLog.create({
-        data: {
-          requestId,
-          userId: request.initiatorId,
-          userName: 'Sistema',
-          action: 'COMPLETED',
-          details: 'Solicitação concluída com sucesso',
-        },
+        data: { requestId, userId: request.initiatorId, userName: 'Sistema', action: 'COMPLETED', details: 'Solicitação concluída com sucesso' },
       });
       await notify(tx, { userId: request.initiatorId, type: 'REQUEST_COMPLETED', title: 'Solicitação concluída', body: `Sua solicitação "${request.title}" foi concluída.`, requestId });
+      return;
     }
   });
 }

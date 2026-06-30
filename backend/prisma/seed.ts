@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { SECTORS } from '../src/lib/org';
-import { seedOnboardingFlow } from './seedOnboarding';
+import { seedOnboardingFlow, ensureChamadoFlow } from './seedOnboarding';
 
 const prisma = new PrismaClient();
 
@@ -87,6 +87,17 @@ async function main() {
         data: { sectorId: setorFin.id, userId: carlosFinanceiro.id, role: 'LIDER', level: 'LIDER_1' },
       });
       console.log('Carlos vinculado como Líder I do setor Financeiro (roteamento de pagamento)');
+    }
+
+    // Marina (Marketing) — Líder I do setor Marketing: destinatário dos chamados
+    // de arte (Fase 2 — qualquer setor pode receber tarefas).
+    const marina = await prisma.user.create({
+      data: { name: 'Marina Costa', email: 'marketing@aprova.com', passwordHash: hash, role: 'USER', departmentId: comercial.id },
+    });
+    const setorMkt = await prisma.sector.findFirst({ where: { name: 'Marketing' } });
+    if (setorMkt) {
+      await prisma.sectorMember.create({ data: { sectorId: setorMkt.id, userId: marina.id, role: 'LIDER', level: 'LIDER_1' } });
+      console.log('Marina vinculada como Líder I do setor Marketing (chamados de arte)');
     }
   }
 
@@ -406,6 +417,7 @@ async function main() {
   // Fase 1 — Trilha de Admissão/Onboarding (config idempotente; NÃO altera o
   // ONBOARDING antigo, que permanece para compat dos testes/e2e atuais).
   await seedOnboardingFlow(prisma);
+  await ensureChamadoFlow(prisma);
 
   console.log('\nSeed concluído com sucesso!');
   if (isProd) {

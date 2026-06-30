@@ -22,6 +22,35 @@ export function isFunctionRole(role: string | null | undefined): role is Functio
   return !!role && (FUNCTION_ROLES as readonly string[]).includes(role);
 }
 
+// Sentinela de papel para etapas de CHAMADO genéricas: "qualquer membro do setor
+// de tratamento". Permite tornar QUALQUER setor (ex.: Marketing) um recebedor de
+// tarefas SEM tocar no enum de funções — o roteamento é data-driven pelo setor.
+export const SECTOR_QUEUE_ROLE = 'SETOR';
+
+export function isSectorQueueStep(step: { requiredRole?: string | null; handlingSectorId?: string | null }): boolean {
+  return step.requiredRole === SECTOR_QUEUE_ROLE && !!step.handlingSectorId;
+}
+
+// Resolve os elegíveis de uma etapa de setor (chamado): membros ATIVOS do setor
+// de tratamento, excluindo o iniciador (SoD). Preferência por nível mais baixo
+// (MEMBRO → LÍDER II → LÍDER I), espelhando a fila de função. Sem fallback ao
+// iniciador — um chamado a outro setor não deve recair sobre quem o abriu.
+export async function resolveSectorEligibles(
+  db: Db,
+  sectorId: string,
+  initiatorId: string,
+): Promise<{ id: string; name: string }[]> {
+  const members = await db.sectorMember.findMany({
+    where: { sectorId, userId: { not: initiatorId }, user: { is: { isActive: true } } },
+    select: { level: true, user: { select: { id: true, name: true } } },
+  });
+  for (const level of ['MEMBRO', 'LIDER_2', 'LIDER_1'] as const) {
+    const found = members.filter((m) => m.level === level).map((m) => m.user).filter((u): u is { id: string; name: string } => u != null);
+    if (found.length > 0) return found;
+  }
+  return [];
+}
+
 // Setores (por nome) cujo array de funções inclui a função pedida.
 function sectorsForFunction(functionRole: FunctionRole): SectorName[] {
   const names: SectorName[] = [];

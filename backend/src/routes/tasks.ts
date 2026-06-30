@@ -4,7 +4,7 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, handleUpload } from '../middleware/upload';
 import { advanceRequest, processSlaExpiries, processEscalations, publishWorkflowEvent } from '../services/workflow';
 import { notify } from '../services/notifications';
-import { isFunctionRole } from '../lib/queue';
+import { isFunctionRole, isSectorQueueStep } from '../lib/queue';
 import { checklistUnmet } from '../lib/checklist';
 
 const router = Router();
@@ -204,15 +204,16 @@ router.post('/:id/complete', authenticate, async (req: AuthRequest, res: Respons
     // marcar COMPLETED e, na mesma transação, cancelar as irmãs PENDING da etapa.
     // Assim a fila fecha mesmo que o usuário conclua sem ter clicado "assumir".
     // Etapas legadas/aprovação mantêm o comportamento atual (sem cancelar irmãs).
-    const step = await prisma.flowStep.findUnique({ where: { id: owned.stepId }, select: { requiredRole: true } });
-    const isFunctionStep = isFunctionRole(step?.requiredRole);
+    const step = await prisma.flowStep.findUnique({ where: { id: owned.stepId }, select: { requiredRole: true, handlingSectorId: true } });
+    // Fila = etapa de função OU de setor (chamado): concluir fecha as irmãs.
+    const isQueueStep = isFunctionRole(step?.requiredRole) || isSectorQueueStep(step ?? {});
 
     const task = await prisma.$transaction(async (tx) => {
       const t = await tx.requestTask.update({
         where: { id: req.params.id },
         data: { status: 'COMPLETED', completedAt: new Date(), notes },
       });
-      if (isFunctionStep) {
+      if (isQueueStep) {
         // Concluída a tarefa de função, o trabalho da etapa está feito: cancela
         // TODAS as outras irmãs ativas (PENDING e IN_PROGRESS) — não só as
         // pendentes — para não deixar uma tarefa assumida em paralelo "presa".
