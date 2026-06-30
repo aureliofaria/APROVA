@@ -692,6 +692,8 @@ export default function RequestDetail() {
                 <dl className="space-y-2">
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Fluxo:</dt><dd className="text-sm text-gray-900">{request.flow?.name}</dd></div>
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Solicitante:</dt><dd className="text-sm text-gray-900">{request.initiator?.name}</dd></div>
+                  {request.initiator?.email && <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">E-mail:</dt><dd className="text-sm text-gray-900">{request.initiator.email}</dd></div>}
+                  {request.sector?.name && <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Setor:</dt><dd className="text-sm text-gray-900">{request.sector.name}</dd></div>}
                   <div className="flex"><dt className="text-sm text-gray-500 w-32 flex-shrink-0">Etapa atual:</dt><dd className="text-sm text-gray-900">{(() => {
                     const steps = request.flow?.steps ?? [];
                     const pos = steps.findIndex((s) => s.order === request.currentStep);
@@ -704,10 +706,10 @@ export default function RequestDetail() {
               {(request.targetEmployee || request.amountCents != null) && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">
-                    {request.targetEmployee ? 'Dados do Colaborador' : 'Dados Financeiros'}
+                    {request.targetEmployee ? 'Dados do Protetor' : 'Dados Financeiros'}
                   </h3>
                   <dl className="space-y-2">
-                    {request.targetEmployee && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Colaborador:</dt><dd className="text-sm text-gray-900">{request.targetEmployee}</dd></div>}
+                    {request.targetEmployee && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Protetor:</dt><dd className="text-sm text-gray-900">{request.targetEmployee}</dd></div>}
                     {request.targetDepartment && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Departamento:</dt><dd className="text-sm text-gray-900">{request.targetDepartment}</dd></div>}
                     {request.startDate && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Data início:</dt><dd className="text-sm text-gray-900">{request.startDate}</dd></div>}
                     {request.amountCents != null && <div className="flex"><dt className="text-sm text-gray-500 w-36 flex-shrink-0">Valor:</dt><dd className="text-sm font-semibold text-gray-900">{formatCurrency(request.amountCents)}</dd></div>}

@@ -16,14 +16,14 @@ import { PAYMENT_CATEGORIES, getCategory } from '../lib/paymentCategories';
 // de compra/estoque; os demais seguem o fluxo padrão.
 const VACANCY_TYPES = [
   { value: 'NOVA', label: 'Nova vaga', desc: 'Aumento de quadro (headcount novo)' },
-  { value: 'SUBSTITUICAO', label: 'Substituição', desc: 'Reposição de colaborador que saiu' },
+  { value: 'SUBSTITUICAO', label: 'Substituição', desc: 'Reposição de protetor que saiu' },
   { value: 'REALOCACAO', label: 'Realocação de setor', desc: 'Movimentação interna' },
   { value: 'PROMOCAO', label: 'Promoção', desc: 'Mudança de função/nível' },
 ];
 
 const flowTypes = [
-  { type: 'ONBOARDING', label: 'Admissão de Colaborador', desc: 'Processo de admissão de novo funcionário', icon: '👤', color: 'border-green-200 hover:border-green-400' },
-  { type: 'OFFBOARDING', label: 'Desligamento de Colaborador', desc: 'Processo de offboarding', icon: '🚪', color: 'border-red-200 hover:border-red-400' },
+  { type: 'ONBOARDING', label: 'Admissão de Protetor', desc: 'Abertura de vaga e admissão de novo protetor', icon: '👤', color: 'border-green-200 hover:border-green-400' },
+  { type: 'OFFBOARDING', label: 'Desligamento de Protetor', desc: 'Processo de offboarding', icon: '🚪', color: 'border-red-200 hover:border-red-400' },
   { type: 'PAYMENT', label: 'Solicitação de Pagamento', desc: 'Aprovação de pagamentos', icon: '💳', color: 'border-golplus-blue-200 hover:border-golplus-blue-400' },
   { type: 'PURCHASE', label: 'Solicitação de Compra', desc: 'Aprovação de compras e aquisições', icon: '🛒', color: 'border-purple-200 hover:border-purple-400' },
 ];
@@ -77,6 +77,17 @@ export default function NewRequest() {
   // no envio (mapa abaixo) para manter os checklists das etapas de TI/Admin.
   const visibleDynamicFields = dynamicFields.filter((f) => !f.key?.startsWith('needs_'));
   const NEEDS_FROM_ASSET: Record<string, string> = { Notebook: 'needs_notebook', Computador: 'needs_desktop', 'Acesso ao ERP': 'needs_erp' };
+  // Acesso por chave aos campos dinâmicos (para montar as seções da vaga).
+  const fieldByKey: Record<string, typeof dynamicFields[number]> = Object.fromEntries(dynamicFields.map((f) => [f.key, f]));
+  const dvByKey = (key: string) => { const f = fieldByKey[key]; return f ? (dynamicValues[f.id] ?? '') : ''; };
+  const renderField = (key: string, labelOverride?: string) => {
+    const f = fieldByKey[key];
+    if (!f) return null;
+    const field = labelOverride ? { ...f, label: labelOverride } : f;
+    return (
+      <DynamicField field={field} value={dynamicValues[f.id] ?? ''} onChange={(v) => setDynamicValues((prev) => ({ ...prev, [f.id]: v }))} />
+    );
+  };
 
   // Tipos de ativo ordenados; os dependentes (ex.: "Suporte para notebook") só
   // aparecem quando o item-pai (ex.: "Notebook") está selecionado.
@@ -121,6 +132,14 @@ export default function NewRequest() {
         data.vacancyType = vacancyType || undefined;
         data.replacementName = vacancyType === 'SUBSTITUICAO' ? replacementName : undefined;
         data.resourceIds = selectedResourceIds.length > 0 ? selectedResourceIds : undefined;
+        // Sem campo "Título" na vaga: gera automaticamente a partir do tipo + cargo.
+        const cargo = dvByKey('cargo').trim();
+        const vlabel = VACANCY_TYPES.find((v) => v.value === vacancyType)?.label || 'Vaga';
+        data.title = cargo ? `${vlabel} — ${cargo}` : vlabel;
+        data.description = undefined;
+        data.targetEmployee = undefined;
+        data.targetDepartment = undefined;
+        data.startDate = undefined;
       }
       if (['PAYMENT', 'PURCHASE'].includes(selectedType)) {
         const reais = form.amount ? parseFloat(form.amount.replace(/[^0-9.]/g, '')) : NaN;
@@ -163,7 +182,6 @@ export default function NewRequest() {
   });
 
   const totalSteps = 5;
-  const isHR = ['ONBOARDING', 'OFFBOARDING'].includes(selectedType);
   const isFinancial = ['PAYMENT', 'PURCHASE'].includes(selectedType);
   const isPayment = selectedType === 'PAYMENT';
   const categoryDef = getCategory(paymentCategory);
@@ -172,6 +190,15 @@ export default function NewRequest() {
     if (step === 1) return !!selectedType;
     if (step === 2) return !!selectedFlow;
     if (step === 3) {
+      if (selectedType === 'ONBOARDING') {
+        if (!vacancyType) return false;
+        // Campos obrigatórios visíveis da vaga (ex.: Motivo do pedido, Cargo).
+        for (const f of visibleDynamicFields) {
+          if (f.required && !dvByKey(f.key).trim()) return false;
+        }
+        if (vacancyType === 'SUBSTITUICAO' && !replacementName.trim()) return false;
+        return true;
+      }
       if (!form.title.trim()) return false;
       if (isPayment) {
         // Espelha as validações do backend (lib/payments.ts): categoria, valor>0,
@@ -264,35 +291,41 @@ export default function NewRequest() {
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Detalhes da Solicitação</h2>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Título *</label>
-                <input
-                  type="text"
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
-                  placeholder="Título da solicitação"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
-                  placeholder="Descreva a solicitação..."
-                />
-              </div>
-              {isHR && (
+              {/* Título e Descrição: apenas para fluxos não-admissão. Na vaga, o
+                  título é gerado automaticamente (tipo + cargo). */}
+              {selectedType !== 'ONBOARDING' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Colaborador</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Título *</label>
+                    <input
+                      type="text"
+                      value={form.title}
+                      onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+                      placeholder="Título da solicitação"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                    <textarea
+                      value={form.description}
+                      onChange={(e) => setForm({ ...form, description: e.target.value })}
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500"
+                      placeholder="Descreva a solicitação..."
+                    />
+                  </div>
+                </>
+              )}
+              {selectedType === 'OFFBOARDING' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Protetor</label>
                     <input type="text" value={form.targetEmployee} onChange={(e) => setForm({ ...form, targetEmployee: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome completo" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Departamento</label>
-                    <input type="text" value={form.targetDepartment} onChange={(e) => setForm({ ...form, targetDepartment: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Departamento de destino" />
+                    <input type="text" value={form.targetDepartment} onChange={(e) => setForm({ ...form, targetDepartment: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Departamento" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Data de Início</label>
@@ -302,8 +335,9 @@ export default function NewRequest() {
               )}
               {selectedType === 'ONBOARDING' && (
                 <>
+                  {/* Tipo de Solicitação (no topo, substitui o Título) */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Vaga</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Solicitação *</label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {VACANCY_TYPES.map((vt) => (
                         <button
@@ -318,25 +352,53 @@ export default function NewRequest() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Motivo do pedido */}
+                  {renderField('motivo_pedido')}
+
+                  {/* Substituição: nome do protetor + situação */}
                   {vacancyType === 'SUBSTITUICAO' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Nome do colaborador a ser substituído</label>
-                      <input type="text" value={replacementName} onChange={(e) => setReplacementName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome completo" />
+                    <div className="space-y-4 border-l-2 border-golplus-orange-200 pl-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Protetor substituído / a substituir</label>
+                        <input type="text" value={replacementName} onChange={(e) => setReplacementName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-golplus-blue-500" placeholder="Nome completo" />
+                      </div>
+                      {renderField('situacao_protetor')}
+                      {['Será substituído', 'Realocação/transferência'].includes(dvByKey('situacao_protetor')) && renderField('situacao_data')}
                     </div>
                   )}
-                  {/* Campos dinâmicos da etapa de abertura (trilha de admissão). */}
+
+                  {/* Informações da Vaga */}
                   {hasDynamicFields && (
                     <div className="border-t border-gray-100 pt-4">
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Dados da Abertura de Vaga</h3>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Informações da Vaga</h3>
                       <div className="space-y-4">
-                        {visibleDynamicFields.map((f) => (
-                          <DynamicField
-                            key={f.id}
-                            field={f}
-                            value={dynamicValues[f.id] ?? ''}
-                            onChange={(v) => setDynamicValues((prev) => ({ ...prev, [f.id]: v }))}
-                          />
-                        ))}
+                        {renderField('cargo')}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {renderField('salario')}
+                          {vacancyType === 'NOVA' && renderField('num_vagas')}
+                          {renderField('escala')}
+                          {renderField('tipo_contrato')}
+                          {renderField('hora_inicio')}
+                          {renderField('hora_fim')}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Perfil do candidato */}
+                  {hasDynamicFields && (
+                    <div className="border-t border-gray-100 pt-4">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Perfil do candidato</h3>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {renderField('idade_min')}
+                          {renderField('idade_max')}
+                          {renderField('estado_civil')}
+                          {renderField('sexo')}
+                        </div>
+                        {renderField('tem_descricao_cargo')}
+                        {renderField('obs_perfil')}
                       </div>
                     </div>
                   )}
@@ -440,7 +502,7 @@ export default function NewRequest() {
               <div className="flex justify-between text-sm"><span className="text-gray-500">Título:</span><span className="font-medium">{form.title}</span></div>
               {isPayment && categoryDef && <div className="flex justify-between text-sm"><span className="text-gray-500">Categoria:</span><span className="font-medium">{categoryDef.icon} {categoryDef.label}</span></div>}
               {form.amount && <div className="flex justify-between text-sm"><span className="text-gray-500">Valor:</span><span className="font-medium text-golplus-blue-700">R$ {parseFloat(form.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>}
-              {form.targetEmployee && <div className="flex justify-between text-sm"><span className="text-gray-500">Colaborador:</span><span className="font-medium">{form.targetEmployee}</span></div>}
+              {form.targetEmployee && <div className="flex justify-between text-sm"><span className="text-gray-500">Protetor:</span><span className="font-medium">{form.targetEmployee}</span></div>}
               {pendingFiles.length > 0 && <div className="flex justify-between text-sm"><span className="text-gray-500">Anexos:</span><span className="font-medium">{pendingFiles.length} arquivo(s)</span></div>}
             </div>
             <p className="text-sm text-gray-500 mt-4">Ao confirmar, a solicitação será criada e enviada para aprovação.</p>

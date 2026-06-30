@@ -27,6 +27,10 @@ export default function ResourceManagement() {
   const [newDependsOnId, setNewDependsOnId] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [editingType, setEditingType] = useState('EQUIPMENT');
+  const [editingSectorId, setEditingSectorId] = useState('');
+  const [editingGroup, setEditingGroup] = useState('');
+  const [editingDependsOnId, setEditingDependsOnId] = useState('');
 
   const { data: resources = [], isLoading } = useQuery({ queryKey: ['resources'], queryFn: resourcesApi.getAll });
   const { data: sectors = [] } = useQuery({ queryKey: ['sectors'], queryFn: sectorsApi.getAll });
@@ -73,9 +77,24 @@ export default function ResourceManagement() {
     updateMutation.mutate({ id: r.id, data: { isActive: !r.isActive } });
   };
 
+  const startEdit = (r: ResourceItem) => {
+    setEditingId(r.id);
+    setEditingName(r.name);
+    setEditingType(r.type);
+    setEditingSectorId(r.sectorId || '');
+    setEditingGroup(r.selectionGroup || '');
+    setEditingDependsOnId(r.dependsOnId || '');
+  };
+
   const handleSaveEdit = (r: ResourceItem) => {
     if (!editingName.trim()) return;
-    updateMutation.mutate({ id: r.id, data: { name: editingName.trim() } });
+    updateMutation.mutate({ id: r.id, data: {
+      name: editingName.trim(),
+      type: editingType as ResourceItem['type'],
+      sectorId: editingSectorId || null,
+      selectionGroup: editingGroup.trim() || null,
+      dependsOnId: editingDependsOnId || null,
+    } });
   };
 
   const resourcesBySector = resources.reduce<Record<string, ResourceItem[]>>((acc, r) => {
@@ -193,63 +212,57 @@ export default function ResourceManagement() {
             </h3>
             <div className="space-y-2">
               {items.map((r) => (
-                <div key={r.id} className={`flex items-center gap-3 p-3 rounded-lg border ${r.isActive ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
-                  {editingId === r.id ? (
-                    <input
-                      type="text"
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      className="flex-1 px-2 py-1 border border-golplus-blue-400 rounded text-sm focus:outline-none focus:ring-1 focus:ring-golplus-blue-500"
-                      autoFocus
-                    />
-                  ) : (
+                editingId === r.id ? (
+                  <div key={r.id} className="p-3 rounded-lg border-2 border-golplus-blue-300 bg-golplus-blue-50/40">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">Nome</label>
+                        <input type="text" value={editingName} onChange={(e) => setEditingName(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" autoFocus />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">Tipo</label>
+                        <select value={editingType} onChange={(e) => setEditingType(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
+                          <option value="EQUIPMENT">Equipamento</option>
+                          <option value="SYSTEM_ACCESS">Acesso a sistema</option>
+                          <option value="OTHER">Outro</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">Setor responsável</label>
+                        <select value={editingSectorId} onChange={(e) => setEditingSectorId(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
+                          <option value="">Geral (sem setor)</option>
+                          {sectors.filter((s) => s.isActive).map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">Grupo de exclusão</label>
+                        <input type="text" value={editingGroup} onChange={(e) => setEditingGroup(e.target.value)} placeholder="Ex: ESTACAO" className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">Depende de</label>
+                        <select value={editingDependsOnId} onChange={(e) => setEditingDependsOnId(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
+                          <option value="">— (item independente) —</option>
+                          {resources.filter((x) => x.id !== r.id).map((x) => (<option key={x.id} value={x.id}>{x.name}</option>))}
+                        </select>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <button onClick={() => handleSaveEdit(r)} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-golplus-blue-600 text-white rounded text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50">Salvar</button>
+                        <button onClick={() => setEditingId(null)} className="px-3 py-1.5 border border-gray-300 text-gray-600 rounded text-sm hover:bg-gray-50">Cancelar</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={r.id} className={`flex items-center gap-3 p-3 rounded-lg border ${r.isActive ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
                     <span className="flex-1 text-sm text-gray-800 font-medium">{r.name}</span>
-                  )}
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeBadgeClass(r.type)}`}>
-                    {typeLabel(r.type)}
-                  </span>
-                  {r.sector && (
-                    <span className="px-2 py-0.5 bg-golplus-blue-50 text-golplus-blue-700 rounded-full text-xs">
-                      {r.sector.name}
-                    </span>
-                  )}
-                  {r.selectionGroup && (
-                    <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs" title="Grupo de exclusão (escolher só um)">
-                      grupo: {r.selectionGroup}
-                    </span>
-                  )}
-                  {r.dependsOnId && (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs" title="Só aparece se o item-pai for escolhido">
-                      depende de {resources.find((x) => x.id === r.dependsOnId)?.name ?? '—'}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => handleToggleActive(r)}
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${r.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                  >
-                    {r.isActive ? 'Ativo' : 'Inativo'}
-                  </button>
-                  {editingId === r.id ? (
-                    <>
-                      <button onClick={() => handleSaveEdit(r)} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 font-medium">Salvar</button>
-                      <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancelar</button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => { setEditingId(r.id); setEditingName(r.name); }}
-                      className="text-xs text-gray-400 hover:text-gray-600"
-                    >
-                      Editar
-                    </button>
-                  )}
-                  <button
-                    onClick={() => deleteMutation.mutate(r.id)}
-                    disabled={deleteMutation.isPending}
-                    className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50"
-                  >
-                    Excluir
-                  </button>
-                </div>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeBadgeClass(r.type)}`}>{typeLabel(r.type)}</span>
+                    {r.sector && (<span className="px-2 py-0.5 bg-golplus-blue-50 text-golplus-blue-700 rounded-full text-xs">{r.sector.name}</span>)}
+                    {r.selectionGroup && (<span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs" title="Grupo de exclusão (escolher só um)">grupo: {r.selectionGroup}</span>)}
+                    {r.dependsOnId && (<span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs" title="Só aparece se o item-pai for escolhido">depende de {resources.find((x) => x.id === r.dependsOnId)?.name ?? '—'}</span>)}
+                    <button onClick={() => handleToggleActive(r)} className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${r.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{r.isActive ? 'Ativo' : 'Inativo'}</button>
+                    <button onClick={() => startEdit(r)} className="text-xs text-gray-400 hover:text-gray-600">Editar</button>
+                    <button onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending} className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50">Excluir</button>
+                  </div>
+                )
               ))}
             </div>
           </div>

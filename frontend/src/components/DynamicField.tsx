@@ -35,6 +35,8 @@ function htmlInputType(type: FormField['type']): { type: string; inputMode?: str
       return { type: 'text', inputMode: 'decimal' };
     case 'DATE':
       return { type: 'date' };
+    case 'TIME':
+      return { type: 'time' };
     case 'EMAIL':
       return { type: 'email' };
     case 'PHONE':

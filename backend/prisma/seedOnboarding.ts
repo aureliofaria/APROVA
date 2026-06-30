@@ -23,7 +23,9 @@ import { PrismaClient } from '@prisma/client';
 
 type Db = PrismaClient;
 
-const FLOW_NAME = 'Trilha de Admissão/Onboarding';
+const FLOW_NAME = 'Admissão de Protetor';
+// Nome antigo (para idempotência: renomeia a trilha existente em vez de duplicar).
+const LEGACY_TRILHA_NAME = 'Trilha de Admissão/Onboarding';
 
 // Helpers de tipo para as receitas declarativas das etapas.
 interface FormFieldSpec {
@@ -78,9 +80,27 @@ const STEPS: StepSpec[] = [
       { field: 'always', op: 'ALWAYS', value: null, targetOrder: 20 },
     ],
     formFields: [
-      { key: 'vacancy_sector', label: 'Setor da vaga', type: 'SELECT', required: true, options: [] },
-      { key: 'vacancy_leader', label: 'Líder responsável', type: 'TEXT', required: true },
-      { key: 'headcount_justification', label: 'Justificativa de headcount', type: 'TEXTAREA' },
+      { key: 'motivo_pedido', label: 'Motivo do pedido', type: 'TEXTAREA', required: true },
+      // Informações da Vaga
+      { key: 'cargo', label: 'Cargo solicitado', type: 'TEXT', required: true },
+      { key: 'salario', label: 'Salário proposto', type: 'MONEY' },
+      { key: 'num_vagas', label: 'Número de vagas', type: 'NUMBER' },
+      { key: 'escala', label: 'Escala de trabalho', type: 'SELECT', options: ['Administrativo', 'Escala 12x36 - Diurno', 'Escala 12x36 - Noturno'] },
+      { key: 'hora_inicio', label: 'Hora início', type: 'TIME' },
+      { key: 'hora_fim', label: 'Hora fim', type: 'TIME' },
+      { key: 'tipo_contrato', label: 'Tipo de contrato', type: 'SELECT', options: ['Aprendiz', 'Estágio', 'Efetivo', 'Temporário', 'Tempo Determinado', 'PJ'] },
+      // Perfil do candidato
+      { key: 'idade_min', label: 'Idade mínima', type: 'NUMBER' },
+      { key: 'idade_max', label: 'Idade máxima', type: 'NUMBER' },
+      { key: 'estado_civil', label: 'Estado civil preferencial', type: 'SELECT', options: ['Indiferente', 'Solteiro(a)', 'Casado(a)', 'Divorciado(a)', 'Viúvo(a)', 'União estável'] },
+      { key: 'sexo', label: 'Sexo', type: 'SELECT', options: ['Masculino', 'Feminino', 'Indiferente'] },
+      { key: 'tem_descricao_cargo', label: 'Já existe Descrição de Cargo para o cargo da vaga solicitada?', type: 'SELECT', options: ['Sim', 'Não'] },
+      { key: 'obs_perfil', label: 'Observações sobre o perfil da vaga', type: 'TEXTAREA' },
+      // Substituição (só usados quando o tipo de solicitação é Substituição)
+      { key: 'situacao_protetor', label: 'Qual é a situação do protetor informado', type: 'SELECT', options: ['Inativo', 'Será substituído', 'Realocação/transferência'] },
+      { key: 'situacao_data', label: 'Data da situação', type: 'DATE' },
+      // needs_* ocultos na tela; derivados dos TIPOS DE ATIVO para gatilhar os
+      // checklists das etapas de TI/Administrativo.
       { key: 'needs_notebook', label: 'Precisa de notebook?', type: 'SELECT', options: SIM_NAO },
       { key: 'needs_desktop', label: 'Precisa de desktop?', type: 'SELECT', options: SIM_NAO },
       { key: 'needs_phone', label: 'Precisa de celular/chip?', type: 'SELECT', options: SIM_NAO },
@@ -262,19 +282,29 @@ export async function seedOnboardingFlow(prisma: Db): Promise<void> {
   const sectorRows = await prisma.sector.findMany({ select: { id: true, name: true } });
   const sectorIdByName = new Map(sectorRows.map((s) => [s.name, s.id]));
 
-  // FlowTemplate (sem unique natural → findFirst+create).
-  let flow = await prisma.flowTemplate.findFirst({ where: { name: FLOW_NAME } });
+  // FlowTemplate (sem unique natural → findFirst+create). Aceita o nome novo OU
+  // o antigo (renomeia em vez de duplicar) e garante o nome/descrição atuais.
+  let flow = await prisma.flowTemplate.findFirst({ where: { name: { in: [FLOW_NAME, LEGACY_TRILHA_NAME] } } });
   if (!flow) {
     flow = await prisma.flowTemplate.create({
       data: {
         name: FLOW_NAME,
-        description: 'Trilha de admissão/onboarding ponta a ponta (Fase 1).',
+        description: 'Admissão de protetor: abertura de vaga e onboarding ponta a ponta.',
         type: 'ONBOARDING',
         scope: 'INTER',
         isActive: true,
       },
     });
+  } else if (flow.name !== FLOW_NAME) {
+    flow = await prisma.flowTemplate.update({ where: { id: flow.id }, data: { name: FLOW_NAME } });
   }
+
+  // Consolida os fluxos de admissão: desativa o ONBOARDING legado de 4 etapas
+  // ('Admissão de Colaborador') para que só exista UM modelo de admissão.
+  await prisma.flowTemplate.updateMany({
+    where: { type: 'ONBOARDING', name: 'Admissão de Colaborador' },
+    data: { isActive: false },
+  });
 
   for (const spec of STEPS) {
     const handlingSectorId = spec.handlingSectorName
@@ -332,6 +362,13 @@ export async function seedOnboardingFlow(prisma: Db): Promise<void> {
         },
       });
       fieldOrder++;
+    }
+
+    // Remove campos obsoletos da etapa que não fazem mais parte da receita
+    // (ex.: vacancy_sector/vacancy_leader/headcount_justification migrados).
+    const keepKeys = (spec.formFields ?? []).map((f) => f.key);
+    if (keepKeys.length > 0) {
+      await prisma.formField.deleteMany({ where: { flowStepId: step.id, key: { notIn: keepKeys } } });
     }
 
     // ChecklistItems (sem unique → findFirst por (flowStepId,label) + create).
