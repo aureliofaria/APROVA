@@ -49,7 +49,9 @@ app.use(
 // Limitador de tentativas em endpoints sensíveis de autenticação (brute force).
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  // Padrão conservador (20/15min) contra brute force; ajustável via env para
+  // ambientes de homologação/carga onde scripts de teste fazem muitos logins.
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Muitas tentativas. Tente novamente mais tarde.' },
