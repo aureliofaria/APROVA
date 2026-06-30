@@ -25,6 +25,12 @@ else
   echo "[aprova] Banco já populado ($USERS usuários) — pulando seed."
 fi
 
+# Sincroniza a CONFIGURAÇÃO em toda subida (idempotente; não toca em dados de
+# pedidos/usuários): trilha "Admissão de Protetor" + campos da vaga + catálogo
+# de tipos de ativo + nomes de fluxo.
+echo "[aprova] Sincronizando configuração (trilha + catálogo)..."
+npm run db:sync-config || echo "[aprova] AVISO: sync-config falhou — seguindo com a subida."
+
 cd /app
 echo "[aprova] Iniciando servidor..."
 exec node backend/dist/index.js

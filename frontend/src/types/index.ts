@@ -201,7 +201,7 @@ export interface AssetMovement {
 }
 
 // Tipo de campo dinâmico (FormField) — Fase 1 (trilha de onboarding).
-export type FieldType = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'DATE' | 'SELECT' | 'EMAIL' | 'CPF' | 'RG' | 'MONEY' | 'PHONE';
+export type FieldType = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'DATE' | 'TIME' | 'SELECT' | 'EMAIL' | 'CPF' | 'RG' | 'MONEY' | 'PHONE';
 
 // Definição de um campo dinâmico de uma etapa (vem de GET /flows/:id).
 export interface FormField {
@@ -370,6 +370,7 @@ export interface Request {
   flow: FlowTemplate;
   initiatorId: string;
   initiator: Pick<User, 'id' | 'name' | 'email' | 'role'>;
+  sector?: { id: string; name: string } | null;
   title: string;
   description?: string;
   status: RequestStatus;

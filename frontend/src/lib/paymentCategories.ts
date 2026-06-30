@@ -17,7 +17,7 @@ export const PAYMENT_CATEGORIES: PaymentCategoryDef[] = [
   { code: 'ASSINATURA', label: 'Assinatura', icon: '🔁', desc: 'Licença / SaaS periódico', requiresSupplier: true, attachmentHint: 'Anexe o comprovante/contrato da assinatura.' },
   { code: 'RECORRENCIA', label: 'Recorrência', icon: '📅', desc: 'Pagamento periódico (aluguel, utilities)', requiresSupplier: true, attachmentHint: 'Anexe o contrato base.' },
   { code: 'SALARIO', label: 'Salário', icon: '💼', desc: 'Folha / pró-labore', requiresSupplier: false, attachmentHint: 'Anexe a folha/holerite.' },
-  { code: 'REEMBOLSO', label: 'Reembolso', icon: '🧾', desc: 'Ressarcimento de despesa do colaborador', requiresSupplier: false, attachmentHint: 'Anexe o comprovante da despesa (obrigatório).' },
+  { code: 'REEMBOLSO', label: 'Reembolso', icon: '🧾', desc: 'Ressarcimento de despesa do protetor', requiresSupplier: false, attachmentHint: 'Anexe o comprovante da despesa (obrigatório).' },
 ];
 
 export function getCategory(code: string): PaymentCategoryDef | undefined {

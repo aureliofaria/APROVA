@@ -17,6 +17,7 @@ export const FIELD_TYPES = [
   'TEXTAREA',
   'NUMBER',
   'DATE',
+  'TIME',
   'SELECT',
   'EMAIL',
   'CPF',
@@ -114,6 +115,8 @@ export function validateFieldValue(type: string, value: string): { ok: boolean; 
       return isValidMoney(v) ? { ok: true } : { ok: false, error: 'Valor monetário inválido' };
     case 'DATE':
       return isValidDate(v) ? { ok: true } : { ok: false, error: 'Data inválida (use AAAA-MM-DD)' };
+    case 'TIME':
+      return /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? { ok: true } : { ok: false, error: 'Hora inválida (use HH:MM)' };
     case 'EMAIL':
       return isValidEmail(v) ? { ok: true } : { ok: false, error: 'E-mail inválido' };
     case 'CPF':

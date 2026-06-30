@@ -103,6 +103,9 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
           },
         },
         initiator: { select: { id: true, name: true, email: true, role: true } },
+        // Setor do pedido (capturado na criação a partir do solicitante) — fica
+        // atrelado e visível a todos os participantes do fluxo.
+        sector: { select: { id: true, name: true } },
         tasks: {
           include: { assignee: { select: { id: true, name: true, email: true } }, step: true },
           orderBy: { createdAt: 'asc' },

@@ -176,7 +176,7 @@ async function main() {
   // Flow 2: Desligamento de Colaborador
   const desligamentoFlow = await prisma.flowTemplate.create({
     data: {
-      name: 'Desligamento de Colaborador',
+      name: 'Desligamento de Protetor',
       description: 'Processo de offboarding e desligamento do colaborador',
       type: 'OFFBOARDING',
       isActive: true,
