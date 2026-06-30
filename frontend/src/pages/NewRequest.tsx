@@ -26,6 +26,7 @@ const flowTypes = [
   { type: 'OFFBOARDING', label: 'Desligamento de Protetor', desc: 'Processo de offboarding', icon: '🚪', color: 'border-red-200 hover:border-red-400' },
   { type: 'PAYMENT', label: 'Solicitação de Pagamento', desc: 'Aprovação de pagamentos', icon: '💳', color: 'border-golplus-blue-200 hover:border-golplus-blue-400' },
   { type: 'PURCHASE', label: 'Solicitação de Compra', desc: 'Aprovação de compras e aquisições', icon: '🛒', color: 'border-purple-200 hover:border-purple-400' },
+  { type: 'CHAMADO', label: 'Chamado / Solicitação a Setor', desc: 'Abrir um chamado para um setor (ex.: artes ao Marketing)', icon: '🎫', color: 'border-amber-200 hover:border-amber-400' },
 ];
 
 export default function NewRequest() {

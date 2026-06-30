@@ -20,10 +20,36 @@
 // ===========================================================================
 
 import { PrismaClient } from '@prisma/client';
+import { SECTOR_QUEUE_ROLE } from '../src/lib/queue';
 
 type Db = PrismaClient;
 
 const FLOW_NAME = 'Admissão de Protetor';
+
+// Fluxo de CHAMADO de exemplo (Fase 2): demonstra QUALQUER setor recebendo
+// tarefas. Aqui, "Solicitação de Arte" roteia direto ao Marketing (etapa única
+// de fila de setor). Idempotente por nome — pode rodar em toda subida.
+export async function ensureChamadoFlow(prisma: Db): Promise<void> {
+  const NAME = 'Solicitação de Arte (Marketing)';
+  const mkt = await prisma.sector.findFirst({ where: { name: 'Marketing' } });
+  if (!mkt) return;
+  let flow = await prisma.flowTemplate.findFirst({ where: { name: NAME } });
+  if (!flow) {
+    flow = await prisma.flowTemplate.create({
+      data: { name: NAME, description: 'Chamado de confecção de artes — roteado ao Marketing.', type: 'CHAMADO', scope: 'INTER', isActive: true },
+    });
+  }
+  // Etapa única: fila do setor Marketing (o solicitante preenche título/descrição
+  // na abertura; o chamado vai direto ao setor responsável).
+  let step = await prisma.flowStep.findFirst({ where: { flowTemplateId: flow.id, order: 0 } });
+  if (!step) {
+    await prisma.flowStep.create({
+      data: { flowTemplateId: flow.id, order: 0, name: 'Atendimento — Marketing', requiredRole: SECTOR_QUEUE_ROLE, handlingSectorId: mkt.id, statusLabel: 'Em atendimento (Marketing)' },
+    });
+  } else if (step.handlingSectorId !== mkt.id || step.requiredRole !== SECTOR_QUEUE_ROLE) {
+    await prisma.flowStep.update({ where: { id: step.id }, data: { requiredRole: SECTOR_QUEUE_ROLE, handlingSectorId: mkt.id } });
+  }
+}
 // Nome antigo (para idempotência: renomeia a trilha existente em vez de duplicar).
 const LEGACY_TRILHA_NAME = 'Trilha de Admissão/Onboarding';
 

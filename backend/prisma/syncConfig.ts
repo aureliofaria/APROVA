@@ -3,7 +3,7 @@
 // apenas garante que a configuração (trilha de admissão, catálogo de tipos de
 // ativo, nomes de fluxo) esteja atualizada após cada deploy.
 import { PrismaClient } from '@prisma/client';
-import { seedOnboardingFlow } from './seedOnboarding';
+import { seedOnboardingFlow, ensureChamadoFlow } from './seedOnboarding';
 
 const prisma = new PrismaClient();
 
@@ -33,6 +33,7 @@ async function ensureAssetCatalog() {
 async function main() {
   await seedOnboardingFlow(prisma); // trilha "Admissão de Protetor" + campos da vaga + desativa legado
   await ensureAssetCatalog();
+  await ensureChamadoFlow(prisma); // chamado de exemplo roteado ao Marketing (Fase 2)
   // Terminologia: "Colaborador" → "Protetor" nos nomes de fluxo.
   await prisma.flowTemplate.updateMany({ where: { type: 'OFFBOARDING', name: 'Desligamento de Colaborador' }, data: { name: 'Desligamento de Protetor' } });
   console.log('[sync-config] configuração sincronizada (trilha + catálogo + nomes).');
