@@ -38,11 +38,17 @@ export default function Logo({
   if (!imgError) {
     return (
       <div
-        className={`flex ${isVertical ? 'flex-col items-center gap-1.5' : 'items-center gap-3'} ${className}`}
+        className={`flex ${isVertical ? 'flex-col items-center gap-1.5' : 'min-w-0 items-center gap-3'} ${className}`}
       >
-        <img src={src} alt="Gol Plus" onError={() => setImgError(true)} className={imgClassName || defaultImg} />
+        {/* Em contêineres estreitos, quem encolhe é a imagem — nunca o wordmark. */}
+        <img
+          src={src}
+          alt="Gol Plus"
+          onError={() => setImgError(true)}
+          className={`${imgClassName || defaultImg} ${isVertical ? '' : 'min-w-0 shrink object-left'}`}
+        />
         {showApprova && (
-          <span className={`font-bold tracking-wide text-sm ${isWhite ? 'text-white' : 'text-golplus-blue'}`}>
+          <span className={`shrink-0 whitespace-nowrap font-bold tracking-wide text-sm ${isWhite ? 'text-white' : 'text-golplus-blue'}`}>
             APROVA
           </span>
         )}
