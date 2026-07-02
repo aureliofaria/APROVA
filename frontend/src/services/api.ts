@@ -142,6 +142,13 @@ export const requestsApi = {
     api.post<Comment>(`/requests/${id}/comments`, { body, stepOrder }).then((r) => r.data),
 };
 
+// Anexos — download autenticado (substitui o antigo link direto para
+// /uploads/<fileName>, que era público e não checava vínculo com a solicitação).
+export const attachmentsApi = {
+  download: (id: string) =>
+    api.get(`/attachments/${id}/download`, { responseType: 'blob' }).then((r) => r.data as Blob),
+};
+
 // Pagamentos — recorrências
 export interface PaymentRecurrence {
   id: string;
