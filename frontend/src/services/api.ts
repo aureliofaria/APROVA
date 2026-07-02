@@ -118,6 +118,9 @@ export const requestsApi = {
   ) => api.post(`/requests/${id}/decision`, payload).then((r) => r.data),
   // Reenvio pelo iniciador quando a solicitação está AWAITING_CORRECTION.
   resubmit: (id: string) => api.post(`/requests/${id}/resubmit`).then((r) => r.data),
+  // ADMIN reprocessa a etapa de uma solicitação BLOCKED (etapa aplicável sem
+  // aprovador ativo) — Fix 1 · auditoria Lupa.
+  retryStep: (id: string) => api.post<Request>(`/requests/${id}/retry-step`).then((r) => r.data),
   // Grava valores de campos dinâmicos de uma etapa (resposta não ecoa valores).
   saveFields: (id: string, stepOrder: number, values: { fieldId: string; value: string }[]) =>
     api.post<{ ok: boolean; count: number; savedFieldIds: string[] }>(`/requests/${id}/fields`, { stepOrder, values }).then((r) => r.data),

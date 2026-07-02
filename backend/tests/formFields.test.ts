@@ -3,7 +3,7 @@ import request from 'supertest';
 import app from '../src/index';
 import prisma from '../src/lib/prisma';
 import { makeFlow, makeUser, resetDb, tokenFor } from './factory';
-import { validateFieldValue } from '../src/lib/fieldValidation';
+import { validateFieldValue, parseSelectOptions } from '../src/lib/fieldValidation';
 
 const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 
@@ -160,6 +160,32 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
       expect(validateFieldValue('MONEY', '150000').ok).toBe(true);
       expect(validateFieldValue('MONEY', 'xpto').ok).toBe(false);
     });
+
+    // Fix 5 (auditoria Lupa — MÉDIO): SELECT aceitava QUALQUER valor, mesmo
+    // fora das options cadastradas. Correção: parseSelectOptions tolerante
+    // (JSON array ou lista separada por vírgula/linha); com options definidas,
+    // valor fora da lista é rejeitado. Sem options (compat), aceita qualquer valor.
+    it('Fix 5: SELECT com options JSON array rejeita valor fora da lista e aceita valor válido', () => {
+      const options = JSON.stringify(['aprovado', 'reprovado']);
+      expect(validateFieldValue('SELECT', 'foo-fora-da-lista', options).ok).toBe(false);
+      expect(validateFieldValue('SELECT', 'aprovado', options).ok).toBe(true);
+      expect(validateFieldValue('SELECT', 'reprovado', options).ok).toBe(true);
+    });
+
+    it('Fix 5: SELECT sem options definidas aceita qualquer valor (compat)', () => {
+      expect(validateFieldValue('SELECT', 'qualquer-coisa', null).ok).toBe(true);
+      expect(validateFieldValue('SELECT', 'qualquer-coisa', undefined).ok).toBe(true);
+      expect(validateFieldValue('SELECT', 'qualquer-coisa', '').ok).toBe(true);
+    });
+
+    it('parseSelectOptions: aceita JSON array de strings, de objetos {value,label} e lista por vírgula/linha', () => {
+      expect(parseSelectOptions(JSON.stringify(['sim', 'nao']))).toEqual(['sim', 'nao']);
+      expect(parseSelectOptions(JSON.stringify([{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]))).toEqual(['a', 'b']);
+      expect(parseSelectOptions('sim,nao')).toEqual(['sim', 'nao']);
+      expect(parseSelectOptions('sim\nnao')).toEqual(['sim', 'nao']);
+      expect(parseSelectOptions(null)).toEqual([]);
+      expect(parseSelectOptions('')).toEqual([]);
+    });
   });
 
   // ---- Gravação de valores + autorização -----------------------------------
@@ -195,6 +221,26 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
       const r = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
         .send({ stepOrder: 0, values: [{ fieldId: money.id, value: '150000' }] });
       expect(r.status).toBe(200);
+    });
+
+    it('Fix 5: SELECT com options — valor fora da lista → 400; valor válido → 200', async () => {
+      const initiator = await makeUser('USER');
+      const assignee = await makeUser('USER');
+      const { flow, step } = await flowWithStep();
+      const select = await prisma.formField.create({
+        data: { flowStepId: step.id, key: 'decisao', label: 'Decisão', type: 'SELECT', options: JSON.stringify(['aprovado', 'reprovado']) },
+      });
+      const reqRow = await requestWithTask(flow.id, step.id, initiator.id, assignee.id);
+
+      const bad = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
+        .send({ stepOrder: 0, values: [{ fieldId: select.id, value: 'talvez' }] });
+      expect(bad.status).toBe(400);
+
+      const good = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
+        .send({ stepOrder: 0, values: [{ fieldId: select.id, value: 'aprovado' }] });
+      expect(good.status).toBe(200);
+      const stored = await prisma.requestFieldValue.findFirstOrThrow({ where: { requestId: reqRow.id, fieldId: select.id } });
+      expect(stored.value).toBe('aprovado');
     });
 
     it('quem não tem tarefa aberta na etapa recebe 403', async () => {
@@ -319,5 +365,92 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
       const row = r.body.find((x: any) => x.id === reqRow.id);
       expect(row.fieldValues).toBeUndefined();
     });
+  });
+});
+
+// ============================================================================
+// FIX (achado BLOQUEADOR da Sonda): GET /requests/:id não incluía `formFields`
+// no include das etapas do fluxo (só authLevels/checklistItems) — o painel
+// "Preencher dados desta etapa" do RequestDetail (canFillFields) nunca
+// renderizava para etapas > 0, travando QUALQUER fluxo com FormField
+// obrigatório fora da etapa 0 (ex.: Admissão · RH — expected_start_date):
+// /complete falhava com 400 e a UI não oferecia onde preencher o campo.
+// ============================================================================
+describe('Fix — GET /requests/:id inclui formFields das etapas (não só a 0)', () => {
+  beforeEach(resetDb);
+
+  async function flowComDuasEtapas() {
+    const flow = await makeFlow('ONBOARDING', [{ order: 0 }, { order: 1, requiredRole: 'RH' }]);
+    const step1 = await prisma.flowStep.findFirstOrThrow({ where: { flowTemplateId: flow.id, order: 1 } });
+    const field = await prisma.formField.create({
+      data: { flowStepId: step1.id, key: 'expected_start_date', label: 'Data prevista de início', type: 'DATE', required: true },
+    });
+    return { flow, step1, field };
+  }
+
+  it('formFields de uma etapa > 0 vêm no GET /requests/:id', async () => {
+    const admin = await makeUser('ADMIN');
+    const initiator = await makeUser('USER');
+    const { flow, field } = await flowComDuasEtapas();
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 1 },
+    });
+
+    const res = await request(app).get(`/api/requests/${req.id}`).set(auth(tokenFor(admin.id)));
+    expect(res.status).toBe(200);
+    const stepBody = res.body.flow.steps.find((s: any) => s.order === 1);
+    expect(stepBody.formFields).toBeDefined();
+    expect(stepBody.formFields.map((f: any) => f.id)).toContain(field.id);
+    expect(stepBody.formFields.find((f: any) => f.id === field.id).key).toBe('expected_start_date');
+  });
+
+  it('formFields não vazam RequestFieldValue (só a DEFINIÇÃO do campo, sem valor)', async () => {
+    const admin = await makeUser('ADMIN');
+    const initiator = await makeUser('USER');
+    const { flow, field } = await flowComDuasEtapas();
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 1 },
+    });
+    await prisma.requestFieldValue.create({ data: { requestId: req.id, fieldId: field.id, value: '2026-08-01' } });
+
+    const res = await request(app).get(`/api/requests/${req.id}`).set(auth(tokenFor(admin.id)));
+    const stepBody = res.body.flow.steps.find((s: any) => s.order === 1);
+    const fieldBody = stepBody.formFields.find((f: any) => f.id === field.id);
+    // A DEFINIÇÃO não carrega `value`/`values` — o valor preenchido só existe
+    // (mascarado quando sensível) em request.fieldValues, canal já auditado.
+    expect(fieldBody.value).toBeUndefined();
+    expect(fieldBody.values).toBeUndefined();
+  });
+
+  it('ciclo completo: campo obrigatório na etapa 1 trava /complete até ser preenchido via /fields', async () => {
+    const rh = await makeUser('RH');
+    const initiator = await makeUser('USER');
+    const { flow, step1, field } = await flowComDuasEtapas();
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 1 },
+    });
+    const task = await prisma.requestTask.create({
+      data: { requestId: req.id, stepId: step1.id, assigneeId: rh.id, title: 'Avaliação RH', status: 'PENDING' },
+    });
+
+    // GET /requests/:id expõe o campo — é o que o painel do RequestDetail usa.
+    const getRes = await request(app).get(`/api/requests/${req.id}`).set(auth(tokenFor(rh.id)));
+    expect(getRes.status).toBe(200);
+    const stepBody = getRes.body.flow.steps.find((s: any) => s.order === 1);
+    expect(stepBody.formFields).toHaveLength(1);
+
+    // Sem preencher: /complete falha 400 com o campo faltante.
+    const failComplete = await request(app).post(`/api/tasks/${task.id}/complete`).set(auth(tokenFor(rh.id))).send({});
+    expect(failComplete.status).toBe(400);
+    expect(failComplete.body.missing).toContain('expected_start_date');
+
+    // Preenche via POST /requests/:id/fields (o mesmo endpoint que o painel usa).
+    const fill = await request(app).post(`/api/requests/${req.id}/fields`).set(auth(tokenFor(rh.id)))
+      .send({ stepOrder: 1, values: [{ fieldId: field.id, value: '2026-08-01' }] });
+    expect(fill.status).toBe(200);
+
+    // Agora /complete passa.
+    const okComplete = await request(app).post(`/api/tasks/${task.id}/complete`).set(auth(tokenFor(rh.id))).send({});
+    expect(okComplete.status).toBe(200);
   });
 });

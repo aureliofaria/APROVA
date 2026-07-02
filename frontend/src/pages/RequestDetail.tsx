@@ -516,6 +516,13 @@ export default function RequestDetail() {
     onSuccess: () => { toast.success('Solicitação reenviada'); qc.invalidateQueries({ queryKey: ['request', id] }); },
     onError: (e: any) => toast.error(apiError(e, 'Erro ao reenviar')),
   });
+  // Fix 1 (auditoria Lupa): etapa aplicável sem aprovador ativo trava a
+  // solicitação (BLOCKED); só ADMIN reprocessa após corrigir o cadastro.
+  const retryStepMutation = useMutation({
+    mutationFn: () => requestsApi.retryStep(id!),
+    onSuccess: () => { toast.success('Etapa reprocessada — solicitação retomada'); qc.invalidateQueries({ queryKey: ['request', id] }); },
+    onError: (e: any) => toast.error(apiError(e, 'Ainda sem usuário elegível para a etapa')),
+  });
 
   const handleUpload = async (files: File[]) => {
     try {
@@ -535,6 +542,8 @@ export default function RequestDetail() {
   const isActive = !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(request.status);
   const isInitiator = user?.id === request.initiatorId;
   const isAwaitingCorrection = request.status === 'AWAITING_CORRECTION';
+  const isBlocked = request.status === 'BLOCKED';
+  const isAdmin = user?.role === 'ADMIN';
 
   // Etapa corrente do fluxo e a tarefa aberta do usuário nela (se houver).
   const currentStep: FlowStep | undefined = request.flow?.steps?.find((s) => s.order === request.currentStep);
@@ -613,6 +622,10 @@ export default function RequestDetail() {
             {/* Iniciador, quando aguardando correção: reenviar. */}
             {isInitiator && isAwaitingCorrection && (
               <button onClick={() => resubmitMutation.mutate()} disabled={resubmitMutation.isPending} className="px-4 py-2 bg-golplus-orange-500 text-white rounded-lg text-sm font-medium hover:bg-golplus-orange-600 disabled:opacity-50">Reenviar</button>
+            )}
+            {/* ADMIN, quando travada por etapa sem aprovador ativo: reprocessar. */}
+            {isAdmin && isBlocked && (
+              <button onClick={() => retryStepMutation.mutate()} disabled={retryStepMutation.isPending} className="px-4 py-2 bg-golplus-orange-500 text-white rounded-lg text-sm font-medium hover:bg-golplus-orange-600 disabled:opacity-50">Reprocessar etapa</button>
             )}
             {/* Aprovação simples (compatibilidade) quando a etapa não usa decisão rica. */}
             {canApprove && isActive && !stepHasApproval && (

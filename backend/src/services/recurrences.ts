@@ -1,5 +1,5 @@
 import prisma from '../lib/prisma';
-import { createRequestTasks } from './workflow';
+import { createRequestTasks, blockRequest } from './workflow';
 
 // Avança uma data conforme a periodicidade da recorrência.
 function computeNextRun(from: Date, unit: string, count: number): Date {
@@ -59,7 +59,13 @@ export async function generateDueRecurrences(now: Date = new Date()): Promise<nu
         details: `Solicitação gerada por recorrência: ${rec.title}`,
       },
     });
-    await createRequestTasks(request.id, rec.flowId, 0);
+    const initResult = await createRequestTasks(request.id, rec.flowId, 0);
+    if (initResult.starvedStepId) {
+      // Etapa 0 aplicável sem elegível (ex.: alçada sem usuário ativo já na
+      // geração automática) — trava em vez de deixar a recorrência "IN_PROGRESS
+      // fantasma" sem nenhum responsável (Fix 1 — auditoria Lupa).
+      await blockRequest(prisma, { id: request.id, initiatorId: rec.initiatorId, title: rec.title }, initResult.starvedStepId);
+    }
     created++;
   }
   return created;

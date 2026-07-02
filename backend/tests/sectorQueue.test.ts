@@ -23,7 +23,8 @@ describe('Fila de SETOR (chamado genérico — Fase 2)', () => {
     const req = await newReq(flow.id, initiator.id);
 
     const created = await createRequestTasks(req.id, flow.id, 0);
-    expect(created).toBe(1);
+    expect(created.created).toBe(1);
+    expect(created.starvedStepId).toBeNull();
     const tasks = await prisma.requestTask.findMany({ where: { requestId: req.id } });
     expect(tasks).toHaveLength(1);
     expect(tasks[0].assigneeId).toBe(membro.id);

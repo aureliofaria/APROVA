@@ -58,7 +58,18 @@ export async function activeRound(db: Db, requestId: string, stepOrder: number):
   return correctionAtMax ? maxRound + 1 : maxRound;
 }
 
-export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma): Promise<number> {
+// Resultado da criação de tarefas de uma ordem do fluxo. `starvedStepId` !=
+// null distingue "ordem sem etapas APLICÁVEIS" (activateOnSectorId sem
+// recurso — pulável, comportamento histórico) de "etapa APLICÁVEL que
+// resolveu ZERO elegíveis" (ex.: alçada cujo papel não tem usuário ativo) —
+// esta última NUNCA deve ser tratada como pulável: quem chama createRequestTasks
+// deve travar a solicitação (BLOCKED) em vez de avançar/concluir em silêncio.
+export interface CreateTasksResult {
+  created: number;
+  starvedStepId: string | null;
+}
+
+export async function createRequestTasks(requestId: string, flowId: string, stepOrder: number = 0, db: Db = prisma): Promise<CreateTasksResult> {
   const [flow, resources, request] = await Promise.all([
     db.flowTemplate.findUnique({
       where: { id: flowId },
@@ -71,7 +82,7 @@ export async function createRequestTasks(requestId: string, flowId: string, step
   if (!flow || !request) throw new Error('Fluxo ou solicitação não encontrado');
 
   const steps = flow.steps.filter(s => s.order === stepOrder);
-  if (steps.length === 0) return;
+  if (steps.length === 0) return { created: 0, starvedStepId: null };
 
   // Roteamento financeiro (Passo 12 ligado): uma etapa de fluxo PAYMENT cujo
   // setor de tratamento (handlingSector) é o 'Financeiro' roteia por orçamento —
@@ -79,6 +90,9 @@ export async function createRequestTasks(requestId: string, flowId: string, step
   const financeiroSector = await db.sector.findFirst({ where: { name: 'Financeiro' }, select: { id: true } });
 
   let tasksCreated = 0;
+  // Primeira etapa APLICÁVEL (não pulada por activateOnSectorId) que resolveu
+  // zero elegíveis — reportado ao chamador para travar a solicitação.
+  let starvedStepId: string | null = null;
 
   for (const step of steps) {
     // Activation condition: skip if request lacks resources from required sector
@@ -193,6 +207,15 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       }
     }
 
+    // Etapa APLICÁVEL (passou pelo activateOnSectorId acima) sem NENHUM
+    // elegível resolvido — ex.: alçada cujo(s) papel(éis) não têm usuário
+    // ativo. Diferente de uma ordem sem etapas aplicáveis, isto NÃO é pulável:
+    // reporta ao chamador para travar a solicitação em vez de concluir sem
+    // aprovação nenhuma.
+    if (assignees.length === 0 && starvedStepId === null) {
+      starvedStepId = step.id;
+    }
+
     const dueDate = step.deadlineHours ? new Date(Date.now() + step.deadlineHours * 60 * 60 * 1000) : null;
 
     for (const assignee of assignees) {
@@ -228,7 +251,58 @@ export async function createRequestTasks(requestId: string, flowId: string, step
       details: `Etapa ${stepOrder} iniciada (${tasksCreated} tarefa(s) criada(s))`,
     },
   });
-  return tasksCreated;
+  return { created: tasksCreated, starvedStepId };
+}
+
+// Descreve, em texto legível, por que uma etapa ficou sem elegíveis — usado no
+// AuditLog/notificação de bloqueio e na mensagem de erro do retry. Não lança:
+// falha ao descrever não deve quebrar o fluxo de bloqueio/desbloqueio.
+export async function describeStarvedStep(db: Db, stepId: string | null): Promise<string> {
+  if (!stepId) return 'etapa sem elegíveis (detalhe indisponível)';
+  const step = await db.flowStep.findUnique({
+    where: { id: stepId },
+    select: { name: true, requiredRole: true, handlingSectorId: true, authLevels: { select: { approverRole: true } } },
+  });
+  if (!step) return 'etapa sem elegíveis (detalhe indisponível)';
+  const roles = Array.from(new Set(
+    [step.requiredRole, ...step.authLevels.map((l) => l.approverRole)].filter((r): r is string => !!r)
+  ));
+  const parts: string[] = [`etapa "${step.name}"`];
+  if (roles.length > 0) parts.push(`sem usuário ativo no(s) papel(éis): ${roles.join(', ')}`);
+  if (step.handlingSectorId) parts.push('sem membro ativo no setor de tratamento');
+  return parts.join(' — ');
+}
+
+// Trava a solicitação quando createRequestTasks reporta uma etapa aplicável
+// sem elegíveis (starvedStepId). Grava o AuditLog, notifica todos os ADMINs
+// ativos e deixa o status em BLOCKED — advanceRequest para (não pula, não
+// conclui) até que um ADMIN corrija o cadastro e chame POST /:id/retry-step.
+export async function blockRequest(
+  db: Db,
+  request: { id: string; initiatorId: string; title: string },
+  starvedStepId: string,
+): Promise<void> {
+  const detail = await describeStarvedStep(db, starvedStepId);
+  await db.request.update({ where: { id: request.id }, data: { status: 'BLOCKED' } });
+  await db.auditLog.create({
+    data: {
+      requestId: request.id,
+      userId: request.initiatorId,
+      userName: 'Sistema',
+      action: 'REQUEST_BLOCKED',
+      details: `Solicitação travada — ${detail}.`,
+    },
+  });
+  const admins = await db.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { id: true } });
+  for (const admin of admins) {
+    await notify(db, {
+      userId: admin.id,
+      type: 'REQUEST_BLOCKED',
+      title: 'Solicitação travada: etapa sem aprovador ativo',
+      body: `A solicitação "${request.title}" travou — ${detail}. Corrija o cadastro e reprocesse a etapa (POST /requests/${request.id}/retry-step).`,
+      requestId: request.id,
+    });
+  }
 }
 
 export async function processSlaExpiries(): Promise<number> {
@@ -606,7 +680,9 @@ export async function advanceRequest(requestId: string) {
     if (!request) return;
     // AWAITING_CORRECTION não avança: o pedido voltou ao solicitante e só segue
     // após reenvio (resubmit), que restaura IN_PROGRESS na etapa de correção.
-    if (['COMPLETED', 'REJECTED', 'CANCELLED', 'AWAITING_CORRECTION'].includes(request.status)) return;
+    // BLOCKED não avança: etapa aplicável sem elegíveis — só sai via retry-step
+    // (ADMIN), nunca por aqui.
+    if (['COMPLETED', 'REJECTED', 'CANCELLED', 'AWAITING_CORRECTION', 'BLOCKED'].includes(request.status)) return;
 
     const complete = await isStepComplete(requestId, request.currentStep, tx);
     if (!complete) return;
@@ -636,8 +712,14 @@ export async function advanceRequest(requestId: string) {
           data: { currentStep: nextStepOrder!, status: 'IN_PROGRESS', statusLabel: nextStatusLabel },
         });
         if (upd.count === 0) return; // outra execução já avançou esta etapa
-        const created = await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
+        const { created, starvedStepId } = await createRequestTasks(requestId, request.flowId, nextStepOrder!, tx);
         await applyResourceTransitions(request, curOrder, false, tx);
+        if (starvedStepId) {
+          // Etapa aplicável sem NENHUM elegível (ex.: alçada sem usuário ativo
+          // do papel) — TRAVA em vez de pular/concluir em silêncio.
+          await blockRequest(tx, { id: requestId, initiatorId: request.initiatorId, title: request.title }, starvedStepId);
+          return;
+        }
         if (created > 0) return; // etapa com tarefas: para e aguarda conclusão
         curOrder = nextStepOrder!; // etapa pulada: segue avançando
         continue;

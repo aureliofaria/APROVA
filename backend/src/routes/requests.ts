@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, handleUpload } from '../middleware/upload';
-import { createRequestTasks, advanceRequest, publishWorkflowEvent, activeRound } from '../services/workflow';
+import { createRequestTasks, advanceRequest, publishWorkflowEvent, activeRound, blockRequest, describeStarvedStep } from '../services/workflow';
 import { Prisma } from '@prisma/client';
 import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
@@ -98,6 +98,13 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
               include: {
                 authLevels: true,
                 checklistItems: { orderBy: { order: 'asc' } },
+                // Sem isto, o painel "Preencher dados desta etapa" do
+                // RequestDetail (canFillFields) nunca via os campos de etapas
+                // > 0 — travando qualquer fluxo com FormField obrigatório fora
+                // da etapa 0 (ex.: Admissão · RH — expected_start_date).
+                // Só DEFINIÇÕES de campo (sem valor — sem PII); os valores
+                // preenchidos continuam vindo mascarados via fieldValues.
+                formFields: { orderBy: { order: 'asc' } },
               },
             },
           },
@@ -344,7 +351,13 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         });
       }
 
-      await createRequestTasks(created.id, flowId, 0, tx);
+      const initResult = await createRequestTasks(created.id, flowId, 0, tx);
+      if (initResult.starvedStepId) {
+        // Etapa 0 aplicável sem elegível (raro, mas possível — ex.: alçada sem
+        // usuário ativo já na submissão): trava em vez de nascer "fantasma" em
+        // IN_PROGRESS sem nenhum responsável.
+        await blockRequest(tx, { id: created.id, initiatorId: req.user.id, title }, initResult.starvedStepId);
+      }
       return created;
     });
 
@@ -363,6 +376,27 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Campos que, embora não estejam no registro formal de PII de 1ª classe
+// (REQUEST_SENSITIVE_FIELDS, vazio hoje), carregam dado pessoal por convenção
+// (nome de colaborador) — o AuditLog de edição não ecoa o valor, só o fato de
+// terem mudado. Os demais campos operacionais logam antes → depois.
+const PUT_AUDIT_PII_FIELDS = new Set(['targetEmployee', 'replacementName']);
+
+// Calcula o diff dos campos editáveis via PUT /:id para o AuditLog. Ignora
+// campos não enviados (undefined — Prisma já os trata como "não altera") e
+// campos sem mudança efetiva.
+function diffRequestEdit(before: Record<string, any>, after: Record<string, any>): Record<string, any> {
+  const changed: Record<string, any> = {};
+  for (const key of Object.keys(after)) {
+    if (after[key] === undefined) continue;
+    const b = before[key] ?? null;
+    const a = after[key] ?? null;
+    if (b === a) continue;
+    changed[key] = PUT_AUDIT_PII_FIELDS.has(key) ? { changed: true } : { before: b, after: a };
+  }
+  return changed;
+}
+
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { title, description, targetEmployee, targetDepartment, startDate, amountCents, supplier, costCenter, justification } = req.body;
@@ -373,10 +407,51 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     if (request.initiatorId !== req.user.id && req.user.role !== 'ADMIN') {
       res.status(403).json({ error: 'Acesso negado' }); return;
     }
-    const updated = await prisma.request.update({
-      where: { id: req.params.id },
-      // Só altera o valor quando enviado no corpo; omitido não zera.
-      data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: 'amountCents' in req.body ? amount.value : undefined, supplier, costCenter, justification },
+
+    // Guarda de status (Fix 2 — auditoria Lupa): sem isto, dava para editar
+    // (inclusive amountCents) uma solicitação já COMPLETED, ou mudar o valor
+    // depois que um aprovador já decidiu sobre o valor antigo — sem abrir novo
+    // ciclo de aprovação. Só se edita quando: (a) devolvida para correção
+    // (AWAITING_CORRECTION — fluxo de correção/resubmit existente, preservado);
+    // ou (b) ainda na etapa 0, em andamento, e NENHUMA decisão foi registrada.
+    const isCorrection = request.status === 'AWAITING_CORRECTION';
+    let isEarlyNoDecision = false;
+    if (!isCorrection && request.status === 'IN_PROGRESS' && request.currentStep === 0) {
+      const decided = await prisma.approval.count({ where: { requestId: request.id } });
+      isEarlyNoDecision = decided === 0;
+    }
+    if (!isCorrection && !isEarlyNoDecision) {
+      res.status(409).json({ error: 'Solicitação não pode ser editada no status atual' }); return;
+    }
+
+    const nextAmount = 'amountCents' in req.body ? amount.value : undefined;
+    const before = {
+      title: request.title, description: request.description, targetEmployee: request.targetEmployee,
+      targetDepartment: request.targetDepartment, startDate: request.startDate, amountCents: request.amountCents,
+      supplier: request.supplier, costCenter: request.costCenter, justification: request.justification,
+    };
+    const after = {
+      title, description, targetEmployee, targetDepartment, startDate, amountCents: nextAmount,
+      supplier, costCenter, justification,
+    };
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const upd = await tx.request.update({
+        where: { id: req.params.id },
+        // Só altera o valor quando enviado no corpo; omitido não zera.
+        data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: nextAmount, supplier, costCenter, justification },
+      });
+      const changed = diffRequestEdit(before, after);
+      if (Object.keys(changed).length > 0) {
+        await tx.auditLog.create({
+          data: {
+            requestId: req.params.id, userId: req.user.id, userName: req.user.name,
+            action: 'REQUEST_EDITED',
+            details: JSON.stringify(changed),
+          },
+        });
+      }
+      return upd;
     });
     res.json(updated);
   } catch {
@@ -617,6 +692,17 @@ async function handleDecision(
               data: { status: 'CANCELLED' },
             });
           }
+        } else if (stepDef) {
+          // Fix 4 (auditoria Lupa): etapa de papel ÚNICO SEM alçada (ex.:
+          // requiredRole=MANAGER difundido a TODOS os MANAGERs ativos, sem
+          // authLevels) exigia que TODOS os aprovadores decidissem — isStepComplete
+          // conta apenas tarefas NÃO-CANCELLED, então as irmãs PENDING/IN_PROGRESS
+          // ficavam travando a etapa. Paridade com as bandas de alçada: 1 decisão
+          // do papel já basta — cancela as demais filas da etapa.
+          await tx.requestTask.updateMany({
+            where: { requestId, step: { order: step }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+            data: { status: 'CANCELLED' },
+          });
         }
       } else if (action === 'REJECT') {
         await tx.approval.create({
@@ -793,7 +879,13 @@ router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Respons
         });
 
         // Recria as tarefas da etapa de retorno (assignees pela definição da etapa).
-        await createRequestTasks(request.id, request.flowId, returnStep, tx);
+        const resubmitResult = await createRequestTasks(request.id, request.flowId, returnStep, tx);
+        if (resubmitResult.starvedStepId) {
+          // A etapa de retorno ficou sem elegível (ex.: quem tinha alçada foi
+          // desativado entre a correção e o reenvio) — trava em vez de deixar
+          // o reenvio "concluído" sem nenhum aprovador com tarefa.
+          await blockRequest(tx, { id: request.id, initiatorId: request.initiatorId, title: request.title }, resubmitResult.starvedStepId);
+        }
 
         await tx.auditLog.create({
           data: {
@@ -814,6 +906,96 @@ router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Respons
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Erro ao reenviar solicitação' });
+  }
+});
+
+// ===========================================================================
+// Destrave de solicitação BLOCKED (Fix 1 — auditoria Lupa). Uma etapa
+// aplicável que resolveu ZERO elegíveis (ex.: alçada cujo papel não tem
+// usuário ativo) trava a solicitação em vez de pular/concluir em silêncio.
+// Só ADMIN pode reprocessar — tipicamente após corrigir o cadastro (ativar
+// alguém no papel, atribuir membro ao setor etc.). Reexecuta createRequestTasks
+// na etapa atual: se resolver algum elegível, volta a IN_PROGRESS; senão,
+// permanece BLOCKED e devolve 409 com o motivo (papel/setor vazio).
+// ===========================================================================
+router.post('/:id/retry-step', authenticate, async (req: AuthRequest, res: Response) => {
+  if (req.user.role !== 'ADMIN') { res.status(403).json({ error: 'Acesso negado: apenas ADMIN pode reprocessar a etapa' }); return; }
+  try {
+    const request = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
+    });
+    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (request.status !== 'BLOCKED') {
+      res.status(409).json({ error: 'Solicitação não está travada' }); return;
+    }
+
+    // Guarda otimista (espelha /resubmit — achado da Lupa): o findUnique acima
+    // roda FORA da transação, então dois cliques concorrentes podem ambos
+    // passar pela checagem de status e entrar aqui. A 1ª operação da transação
+    // reivindica a transição BLOCKED -> IN_PROGRESS com updateMany guardado no
+    // status atual; a 2ª chamada concorrente encontra count=0 (o status já
+    // mudou) e aborta com 409 — sem duplicar tarefas/AuditLog/notificação.
+    // Se a etapa continuar sem elegível, o status é revertido para BLOCKED
+    // dentro da MESMA transação, liberando uma nova tentativa legítima depois.
+    const RACE = Symbol('retry-step-race');
+    let result: { ok: true } | { ok: false; detail: string };
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const moved = await tx.request.updateMany({
+          where: { id: request.id, status: 'BLOCKED' },
+          data: { status: 'IN_PROGRESS' },
+        });
+        if (moved.count === 0) throw RACE;
+
+        const { created, starvedStepId } = await createRequestTasks(request.id, request.flowId, request.currentStep, tx);
+        if (created > 0 && !starvedStepId) {
+          const step = request.flow.steps.find((s) => s.order === request.currentStep);
+          await tx.request.update({
+            where: { id: request.id },
+            data: { statusLabel: step?.statusLabel ?? null },
+          });
+          await tx.auditLog.create({
+            data: {
+              requestId: request.id, userId: req.user.id, userName: req.user.name,
+              action: 'REQUEST_UNBLOCKED',
+              details: `Etapa reprocessada com sucesso (${created} tarefa(s) criada(s))`,
+            },
+          });
+          return { ok: true as const };
+        }
+        // Ainda sem elegível: reverte a claim otimista — a solicitação
+        // permanece BLOCKED (nada de "meio-desbloqueada").
+        await tx.request.update({ where: { id: request.id }, data: { status: 'BLOCKED' } });
+        const detail = await describeStarvedStep(
+          tx,
+          starvedStepId ?? request.flow.steps.find((s) => s.order === request.currentStep)?.id ?? null,
+        );
+        await tx.auditLog.create({
+          data: {
+            requestId: request.id, userId: req.user.id, userName: req.user.name,
+            action: 'RETRY_STEP_FAILED',
+            details: `Reprocessamento não resolveu elegíveis — ${detail}`,
+          },
+        });
+        return { ok: false as const, detail };
+      });
+    } catch (e) {
+      if (e === RACE) { res.status(409).json({ error: 'Solicitação não está travada' }); return; }
+      throw e;
+    }
+
+    // Narrowing via 'in' (não `!result.ok`): TS não preserva a união
+    // discriminada de uma variável atribuída dentro de um try/catch quando
+    // declarada fora dele — 'detail' in result narra corretamente.
+    if ('detail' in result) {
+      res.status(409).json({ error: `Ainda sem usuário elegível: ${result.detail}` });
+      return;
+    }
+    const updated = await prisma.request.findUnique({ where: { id: request.id } });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Erro ao reprocessar etapa' });
   }
 });
 
@@ -859,7 +1041,7 @@ router.post('/:id/fields', authenticate, async (req: AuthRequest, res: Response)
       const field = fieldsById.get(item.fieldId);
       if (!field) { res.status(400).json({ error: `Campo ${item.fieldId} não pertence a esta etapa` }); return; }
       const value = item.value == null ? '' : String(item.value).trim();
-      const check = validateFieldValue(field.type, value);
+      const check = validateFieldValue(field.type, value, field.options);
       if (!check.ok) { res.status(400).json({ error: `Campo "${field.label}": ${check.error}` }); return; }
       prepared.push({ fieldId: field.id, value, sensitiveType: field.sensitiveType, key: field.key });
     }
