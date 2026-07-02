@@ -685,6 +685,17 @@ async function handleDecision(
               data: { status: 'CANCELLED' },
             });
           }
+        } else if (stepDef) {
+          // Fix 4 (auditoria Lupa): etapa de papel ÚNICO SEM alçada (ex.:
+          // requiredRole=MANAGER difundido a TODOS os MANAGERs ativos, sem
+          // authLevels) exigia que TODOS os aprovadores decidissem — isStepComplete
+          // conta apenas tarefas NÃO-CANCELLED, então as irmãs PENDING/IN_PROGRESS
+          // ficavam travando a etapa. Paridade com as bandas de alçada: 1 decisão
+          // do papel já basta — cancela as demais filas da etapa.
+          await tx.requestTask.updateMany({
+            where: { requestId, step: { order: step }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+            data: { status: 'CANCELLED' },
+          });
         }
       } else if (action === 'REJECT') {
         await tx.approval.create({
