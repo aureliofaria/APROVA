@@ -1007,7 +1007,7 @@ router.post('/:id/fields', authenticate, async (req: AuthRequest, res: Response)
       const field = fieldsById.get(item.fieldId);
       if (!field) { res.status(400).json({ error: `Campo ${item.fieldId} não pertence a esta etapa` }); return; }
       const value = item.value == null ? '' : String(item.value).trim();
-      const check = validateFieldValue(field.type, value);
+      const check = validateFieldValue(field.type, value, field.options);
       if (!check.ok) { res.status(400).json({ error: `Campo "${field.label}": ${check.error}` }); return; }
       prepared.push({ fieldId: field.id, value, sensitiveType: field.sensitiveType, key: field.key });
     }

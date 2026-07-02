@@ -3,7 +3,7 @@ import request from 'supertest';
 import app from '../src/index';
 import prisma from '../src/lib/prisma';
 import { makeFlow, makeUser, resetDb, tokenFor } from './factory';
-import { validateFieldValue } from '../src/lib/fieldValidation';
+import { validateFieldValue, parseSelectOptions } from '../src/lib/fieldValidation';
 
 const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 
@@ -160,6 +160,32 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
       expect(validateFieldValue('MONEY', '150000').ok).toBe(true);
       expect(validateFieldValue('MONEY', 'xpto').ok).toBe(false);
     });
+
+    // Fix 5 (auditoria Lupa — MÉDIO): SELECT aceitava QUALQUER valor, mesmo
+    // fora das options cadastradas. Correção: parseSelectOptions tolerante
+    // (JSON array ou lista separada por vírgula/linha); com options definidas,
+    // valor fora da lista é rejeitado. Sem options (compat), aceita qualquer valor.
+    it('Fix 5: SELECT com options JSON array rejeita valor fora da lista e aceita valor válido', () => {
+      const options = JSON.stringify(['aprovado', 'reprovado']);
+      expect(validateFieldValue('SELECT', 'foo-fora-da-lista', options).ok).toBe(false);
+      expect(validateFieldValue('SELECT', 'aprovado', options).ok).toBe(true);
+      expect(validateFieldValue('SELECT', 'reprovado', options).ok).toBe(true);
+    });
+
+    it('Fix 5: SELECT sem options definidas aceita qualquer valor (compat)', () => {
+      expect(validateFieldValue('SELECT', 'qualquer-coisa', null).ok).toBe(true);
+      expect(validateFieldValue('SELECT', 'qualquer-coisa', undefined).ok).toBe(true);
+      expect(validateFieldValue('SELECT', 'qualquer-coisa', '').ok).toBe(true);
+    });
+
+    it('parseSelectOptions: aceita JSON array de strings, de objetos {value,label} e lista por vírgula/linha', () => {
+      expect(parseSelectOptions(JSON.stringify(['sim', 'nao']))).toEqual(['sim', 'nao']);
+      expect(parseSelectOptions(JSON.stringify([{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]))).toEqual(['a', 'b']);
+      expect(parseSelectOptions('sim,nao')).toEqual(['sim', 'nao']);
+      expect(parseSelectOptions('sim\nnao')).toEqual(['sim', 'nao']);
+      expect(parseSelectOptions(null)).toEqual([]);
+      expect(parseSelectOptions('')).toEqual([]);
+    });
   });
 
   // ---- Gravação de valores + autorização -----------------------------------
@@ -195,6 +221,26 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
       const r = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
         .send({ stepOrder: 0, values: [{ fieldId: money.id, value: '150000' }] });
       expect(r.status).toBe(200);
+    });
+
+    it('Fix 5: SELECT com options — valor fora da lista → 400; valor válido → 200', async () => {
+      const initiator = await makeUser('USER');
+      const assignee = await makeUser('USER');
+      const { flow, step } = await flowWithStep();
+      const select = await prisma.formField.create({
+        data: { flowStepId: step.id, key: 'decisao', label: 'Decisão', type: 'SELECT', options: JSON.stringify(['aprovado', 'reprovado']) },
+      });
+      const reqRow = await requestWithTask(flow.id, step.id, initiator.id, assignee.id);
+
+      const bad = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
+        .send({ stepOrder: 0, values: [{ fieldId: select.id, value: 'talvez' }] });
+      expect(bad.status).toBe(400);
+
+      const good = await request(app).post(`/api/requests/${reqRow.id}/fields`).set(auth(tokenFor(assignee.id)))
+        .send({ stepOrder: 0, values: [{ fieldId: select.id, value: 'aprovado' }] });
+      expect(good.status).toBe(200);
+      const stored = await prisma.requestFieldValue.findFirstOrThrow({ where: { requestId: reqRow.id, fieldId: select.id } });
+      expect(stored.value).toBe('aprovado');
     });
 
     it('quem não tem tarefa aberta na etapa recebe 403', async () => {
