@@ -23,6 +23,16 @@ model User {
   sectorId           String?
   sector             Sector?     @relation("SectorMembers", fields: [sectorId], references: [id])
   isActive           Boolean     @default(true)
+  // Sincronização M365/Entra ID: origem do registro, id do objeto no Entra
+  // (usado como chave de correlação estável entre execuções) e o instante da
+  // última sincronização que tocou este usuário. `origin` é fixado na CRIAÇÃO
+  // e nunca é reescrito por execuções seguintes (fato histórico).
+  origin             String      @default("LOCAL") // LOCAL | M365
+  externalId         String?     @unique // id do objeto no Entra (GraphUser.id)
+  syncedAt           DateTime?
+  // Conta criada pelo sync sem senha local utilizável: login por senha fica
+  // bloqueado até um ADMIN definir uma senha (o que também limpa esta flag).
+  needsPasswordSetup Boolean     @default(false)
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
@@ -698,4 +708,26 @@ model DelegationAuditLog {
 
   @@index([sectorId])
   @@index([byUserId])
+}
+
+// Histórico das execuções da sincronização de usuários com o M365/Entra ID.
+// Uma linha por execução (manual ou agendada); alimenta o endpoint de status
+// (contadores da última execução) e serve de trilha de auditoria mínima —
+// SEM listar quais usuários foram afetados (isso fica no AuditLog se algum
+// dia for necessário; aqui é só o resumo agregado).
+model M365SyncRun {
+  id           String    @id @default(cuid())
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  status       String    @default("RUNNING") // RUNNING | SUCCESS | ERROR
+  dryRun       Boolean   @default(false)
+  created      Int       @default(0)
+  reactivated  Int       @default(0)
+  deactivated  Int       @default(0)
+  skipped      Int       @default(0)
+  errors       Int       @default(0)
+  errorMessage String?
+  triggeredBy  String? // 'MANUAL' | 'SCHEDULER'
+
+  @@index([startedAt])
 }
