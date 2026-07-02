@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { requestsApi, inventoryApi, tasksApi, flowsApi, usersApi } from '../services/api';
+import { requestsApi, inventoryApi, tasksApi, flowsApi, usersApi, attachmentsApi } from '../services/api';
 import { StatusBadge, FlowTypeBadge, roleLabel } from '../components/StatusBadge';
 import DynamicField, { parseFieldOptions } from '../components/DynamicField';
 import FileUpload from '../components/FileUpload';
@@ -542,6 +542,26 @@ export default function RequestDetail() {
     }
   };
 
+  // Download autenticado do anexo (substitui o antigo link direto para
+  // /uploads/<fileName>, que era servido sem checar login nem vínculo com a
+  // solicitação). O backend valida o vínculo e devolve o binário; aqui só
+  // disparamos o download com o nome original do arquivo.
+  const handleDownloadAttachment = async (attachmentId: string, originalName: string) => {
+    try {
+      const blob = await attachmentsApi.download(attachmentId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = originalName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Erro ao baixar anexo');
+    }
+  };
+
   if (isLoading) return <div className="text-center py-12 text-gray-500">Carregando...</div>;
   if (!request) return (
     <div className="text-center py-12">
@@ -868,7 +888,13 @@ export default function RequestDetail() {
                             <p className="text-xs text-gray-500">{(att.fileSize / 1024).toFixed(1)} KB · {format(new Date(att.createdAt), 'dd/MM/yyyy')}</p>
                           </div>
                         </div>
-                        <a href={`/uploads/${att.fileName}`} target="_blank" rel="noopener noreferrer" className="text-golplus-blue-600 hover:text-golplus-blue-800 text-sm">Baixar</a>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadAttachment(att.id, att.originalName)}
+                          className="text-golplus-blue-600 hover:text-golplus-blue-800 text-sm"
+                        >
+                          Baixar
+                        </button>
                       </li>
                     ))}
                   </ul>
