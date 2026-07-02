@@ -58,10 +58,13 @@ export default function Sidebar({ orientation = 'horizontal', onNavigate }: Side
               to={item.path}
               onClick={onNavigate}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors border-l-4 ${
+                `flex items-center gap-3 px-3 py-2 text-sm font-medium transition-colors border-l-4 ${
                   isActive
-                    ? 'bg-white/10 text-white border-golplus-orange'
-                    : 'text-golplus-blue-100 border-transparent hover:bg-white/10 hover:text-white'
+                    // Cantos arredondados só do lado direito: o border-l-4 laranja
+                    // precisa ficar reto/encostado, senão o rounded-xl "corta" a
+                    // borda nos cantos superior/inferior esquerdos.
+                    ? 'bg-white/10 text-white border-golplus-orange rounded-r-xl'
+                    : 'text-golplus-blue-100 border-transparent hover:bg-white/10 hover:text-white rounded-xl'
                 }`
               }
             >
