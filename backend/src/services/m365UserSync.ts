@@ -31,7 +31,14 @@
 //  • NUNCA desativa o último ADMIN ativo (protegido mesmo no meio da mesma
 //    execução, à medida que outras desativações vão sendo decididas).
 //  • O estado local em memória é atualizado a cada mutação decidida, então o
-//    resultado independe da ordem de processamento das entradas.
+//    resultado independe da ordem de processamento das entradas; ambiguidade
+//    de identidade (match por e-mail com externalId local apontando para
+//    OUTRO objeto Entra — reciclagem de e-mail) NUNCA vira mutação: gera erro
+//    explícito no run e se resolve no próximo ciclo, após o rename.
+//
+// Pressuposto (aceito por design): objeto HABILITADO+LICENCIADO com um
+// e-mail no tenant = acesso àquele e-mail — o Entra é a fonte da verdade
+// também para a posse do endereço.
 //  • dry-run (config.m365Sync.dryRun ou deps.dryRun): calcula os contadores
 //    SEM gravar alterações de USUÁRIO. O registro da execução (M365SyncRun)
 //    É gravado mesmo em dry-run — intencional, para observabilidade (o
@@ -204,9 +211,13 @@ export async function runM365UserSync(deps: M365SyncDeps = {}): Promise<M365Sync
       // Match PRIMEIRO por externalId (troca de e-mail no Entra não tranca o
       // usuário para fora), DEPOIS por e-mail.
       let existing: LocalUser | undefined;
+      let matchedByExternalId = false;
       for (const id of entry.ids) {
         existing = byExternalId.get(id);
-        if (existing) break;
+        if (existing) {
+          matchedByExternalId = true;
+          break;
+        }
       }
       if (!existing) existing = byEmail.get(entry.email);
 
@@ -246,6 +257,20 @@ export async function runM365UserSync(deps: M365SyncDeps = {}): Promise<M365Sync
       // fica para decisão manual futura.
       if (existing.origin !== 'M365') {
         result.skipped++;
+        continue;
+      }
+
+      // Conflito de identidade no match por E-MAIL: o usuário local já está
+      // correlacionado a OUTRO objeto Entra (externalId fora de entry.ids) —
+      // típico de reciclagem de e-mail. NUNCA re-estampar silenciosamente:
+      // erro explícito, nenhuma mutação (matchedIds já protege da 2ª passada;
+      // o rename do objeto original resolve o e-mail e o próximo run cria a
+      // conta nova sem ambiguidade).
+      if (!matchedByExternalId && existing.externalId && !entry.ids.includes(existing.externalId)) {
+        result.errors++;
+        result.errorMessages.push(
+          `conflito de identidade: e-mail "${entry.email}" pertence ao usuário local ${existing.id} (externalId ${existing.externalId}), mas o tenant apresenta ids [${entry.ids.join(', ')}] — nenhuma alteração aplicada`
+        );
         continue;
       }
 

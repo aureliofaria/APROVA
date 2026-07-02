@@ -214,6 +214,57 @@ describe('m365UserSync · runM365UserSync', () => {
     expect(run.errorMessage).toMatch(/colisão de e-mail/i);
   });
 
+  it('V4 · reciclagem de e-mail + rename em ordem adversa: conflito explícito, sem re-estampa e sem conta duplicada', async () => {
+    // Cenário exato da Lupa: A (MANAGER, a@, entra-a) foi renomeada para b@ no
+    // Entra; um objeto NOVO (entra-c) assumiu o e-mail a@. Ordem adversa: a
+    // entrada a@ é processada ANTES da b@.
+    const a = await makeUser('MANAGER', 'Gestora A', { email: 'a@golplus.com.br', origin: 'M365', externalId: 'entra-a' });
+    const rowRecycled = graphUser({ mail: 'a@golplus.com.br', id: 'entra-c', displayName: 'Novato C' });
+    const rowRenamed = graphUser({ mail: 'b@golplus.com.br', id: 'entra-a' });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [rowRecycled, rowRenamed] });
+
+    expect(res.errors).toBe(1);
+    expect(res.status).toBe('ERROR');
+    expect(res.errorMessages[0]).toMatch(/conflito de identidade/i);
+    expect(res.created).toBe(0); // C NÃO rouba a conta nem vira duplicata neste run
+    expect(res.deactivated).toBe(0);
+
+    const freshA = await fresh(a.id);
+    expect(freshA.externalId).toBe('entra-a'); // NÃO re-estampado com entra-c
+    expect(freshA.role).toBe('MANAGER'); // papel intacto
+    expect(freshA.email).toBe('b@golplus.com.br'); // rename aplicado pela entrada b@ (match por externalId)
+    expect(freshA.isActive).toBe(true);
+    expect(await prisma.user.count()).toBe(1);
+
+    // Próximo run (mesmo tenant): o e-mail a@ ficou livre → C é criado limpo.
+    const res2 = await runM365UserSync({ fetchUsers: async () => [rowRecycled, rowRenamed] });
+    expect(res2.errors).toBe(0);
+    expect(res2.created).toBe(1);
+    const c = await prisma.user.findUniqueOrThrow({ where: { email: 'a@golplus.com.br' } });
+    expect(c.externalId).toBe('entra-c');
+    expect(c.role).toBe('USER');
+  });
+
+  it('V4 · controle: na ordem natural (rename antes da reciclagem) o run é limpo — A renomeada e C criado', async () => {
+    const a = await makeUser('MANAGER', 'Gestora A', { email: 'a@golplus.com.br', origin: 'M365', externalId: 'entra-a' });
+    const rowRenamed = graphUser({ mail: 'b@golplus.com.br', id: 'entra-a' });
+    const rowRecycled = graphUser({ mail: 'a@golplus.com.br', id: 'entra-c', displayName: 'Novato C' });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [rowRenamed, rowRecycled] });
+    expect(res.errors).toBe(0);
+    expect(res.created).toBe(1);
+
+    const freshA = await fresh(a.id);
+    expect(freshA.email).toBe('b@golplus.com.br');
+    expect(freshA.externalId).toBe('entra-a');
+    expect(freshA.role).toBe('MANAGER');
+
+    const c = await prisma.user.findUniqueOrThrow({ where: { email: 'a@golplus.com.br' } });
+    expect(c.externalId).toBe('entra-c');
+    expect(c.role).toBe('USER');
+  });
+
   it('MÉDIO · conta LOCAL que casa por e-mail com linha INELEGÍVEL fica intocada (não desativa, não estampa)', async () => {
     const local = await makeUser('USER', 'Local Coincidente', { email: 'coincide@golplus.com.br', origin: 'LOCAL' });
     const gu = graphUser({ mail: 'coincide@golplus.com.br', assignedLicenses: [] });
