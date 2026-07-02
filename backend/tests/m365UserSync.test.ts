@@ -137,7 +137,113 @@ describe('m365UserSync · runM365UserSync', () => {
     expect((await fresh(removed.id)).isActive).toBe(false);
   });
 
-  it('dry-run calcula os contadores sem gravar nada no banco', async () => {
+  // ==========================================================================
+  // Achados da revisão (Lupa) — cenários adversariais
+  // ==========================================================================
+
+  it('ALTO 1 · e-mail duplicado no tenant: linha inelegível NÃO desativa usuário elegível (independe da ordem)', async () => {
+    const u = await makeUser('USER', 'Duplicada', { email: 'dup@golplus.com.br', origin: 'M365' });
+    const eligibleRow = graphUser({ mail: 'dup@golplus.com.br', id: 'entra-dup-licenciada' });
+    const ineligibleRow = graphUser({ mail: 'dup@golplus.com.br', id: 'entra-dup-shared', assignedLicenses: [] });
+
+    // Ordem adversarial original da Lupa: a inelegível processada DEPOIS da elegível.
+    let res = await runM365UserSync({ fetchUsers: async () => [eligibleRow, ineligibleRow] });
+    expect(res.deactivated).toBe(0);
+    expect((await fresh(u.id)).isActive).toBe(true);
+
+    // Ordem inversa — mesmo resultado (união de elegibilidade elimina a ordem).
+    res = await runM365UserSync({ fetchUsers: async () => [ineligibleRow, eligibleRow] });
+    expect(res.deactivated).toBe(0);
+    const after = await fresh(u.id);
+    expect(after.isActive).toBe(true);
+    // A estampa usa a linha ELEGÍVEL como representativa.
+    expect(after.externalId).toBe('entra-dup-licenciada');
+  });
+
+  it('ALTO 1 · e-mail duplicado na criação: cria UMA conta quando qualquer linha é elegível', async () => {
+    const eligibleRow = graphUser({ mail: 'nova-dup@golplus.com.br', id: 'entra-nd-lic' });
+    const ineligibleRow = graphUser({ mail: 'nova-dup@golplus.com.br', id: 'entra-nd-shared', assignedLicenses: [] });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [ineligibleRow, eligibleRow] });
+    expect(res.created).toBe(1);
+
+    const all = await prisma.user.findMany({ where: { email: 'nova-dup@golplus.com.br' } });
+    expect(all).toHaveLength(1);
+    expect(all[0].isActive).toBe(true);
+    expect(all[0].externalId).toBe('entra-nd-lic');
+  });
+
+  it('ALTO 2 · troca de e-mail no Entra: match por externalId atualiza o e-mail local (não cria conta nem tranca o usuário)', async () => {
+    const u = await makeUser('USER', 'Renomeada', {
+      email: 'antigo@golplus.com.br',
+      origin: 'M365',
+      externalId: 'entra-fixo-123',
+    });
+    const gu = graphUser({ mail: 'novo@golplus.com.br', id: 'entra-fixo-123' });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [gu] });
+    expect(res.created).toBe(0); // NÃO cria duplicata com o e-mail novo
+    expect(res.deactivated).toBe(0); // NÃO desativa o "antigo@" como órfão na 2ª passada
+
+    const after = await fresh(u.id);
+    expect(after.email).toBe('novo@golplus.com.br');
+    expect(after.isActive).toBe(true);
+    expect(after.externalId).toBe('entra-fixo-123');
+    expect(await prisma.user.count()).toBe(1);
+  });
+
+  it('ALTO 2 · colisão de e-mail no rename: registra erro claro e NÃO desativa ninguém', async () => {
+    const a = await makeUser('USER', 'A', { email: 'a@golplus.com.br', origin: 'M365', externalId: 'entra-a' });
+    const b = await makeUser('USER', 'B', { email: 'b@golplus.com.br', origin: 'M365', externalId: 'entra-b' });
+    // No Entra, o objeto de A passou a usar o e-mail de B.
+    const gu = graphUser({ mail: 'b@golplus.com.br', id: 'entra-a' });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [gu] });
+    expect(res.errors).toBe(1);
+    expect(res.status).toBe('ERROR');
+    expect(res.errorMessages[0]).toMatch(/colisão de e-mail/i);
+    expect(res.deactivated).toBe(0); // ninguém desativado — nem A, nem B (2ª passada)
+
+    const freshA = await fresh(a.id);
+    const freshB = await fresh(b.id);
+    expect(freshA.isActive).toBe(true);
+    expect(freshA.email).toBe('a@golplus.com.br'); // rename NÃO aplicado
+    expect(freshB.isActive).toBe(true);
+
+    const run = await prisma.m365SyncRun.findUniqueOrThrow({ where: { id: res.id } });
+    expect(run.errorMessage).toMatch(/colisão de e-mail/i);
+  });
+
+  it('MÉDIO · conta LOCAL que casa por e-mail com linha INELEGÍVEL fica intocada (não desativa, não estampa)', async () => {
+    const local = await makeUser('USER', 'Local Coincidente', { email: 'coincide@golplus.com.br', origin: 'LOCAL' });
+    const gu = graphUser({ mail: 'coincide@golplus.com.br', assignedLicenses: [] });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [gu] });
+    expect(res.deactivated).toBe(0);
+    expect(res.skipped).toBe(1);
+
+    const after = await fresh(local.id);
+    expect(after.isActive).toBe(true);
+    expect(after.externalId).toBeNull();
+    expect(after.origin).toBe('LOCAL');
+    expect(after.syncedAt).toBeNull();
+  });
+
+  it('MÉDIO · conta LOCAL que casa com linha ELEGÍVEL também fica intocada (sem estampa; vínculo é decisão manual)', async () => {
+    const local = await makeUser('USER', 'Local Elegível', { email: 'local-eleg@golplus.com.br', origin: 'LOCAL' });
+    const gu = graphUser({ mail: 'local-eleg@golplus.com.br' });
+
+    const res = await runM365UserSync({ fetchUsers: async () => [gu] });
+    expect(res.created).toBe(0);
+    expect(res.skipped).toBe(1);
+
+    const after = await fresh(local.id);
+    expect(after.externalId).toBeNull();
+    expect(after.origin).toBe('LOCAL');
+    expect(after.syncedAt).toBeNull();
+  });
+
+  it('BAIXO · dry-run: nenhuma alteração de USUÁRIO é gravada, mas o M365SyncRun é registrado com dryRun=true', async () => {
     const existingInactive = await makeUser('USER', 'Inativo', { email: 'inativo@golplus.com.br', isActive: false, origin: 'M365' });
     const existingActive = await makeUser('USER', 'Ativo', { email: 'ativo@golplus.com.br', origin: 'M365' });
     const guReactivate = graphUser({ mail: 'inativo@golplus.com.br' });
@@ -150,11 +256,19 @@ describe('m365UserSync · runM365UserSync', () => {
     expect(res.reactivated).toBe(1);
     expect(res.deactivated).toBe(1);
 
-    // Nada foi persistido.
+    // Nenhuma alteração de USUÁRIO foi persistida.
     expect((await fresh(existingInactive.id)).isActive).toBe(false);
     expect((await fresh(existingActive.id)).isActive).toBe(true);
     const created = await prisma.user.findUnique({ where: { email: 'novo-dry@golplus.com.br' } });
     expect(created).toBeNull();
+
+    // O registro da execução É gravado (intencional — observabilidade), com a
+    // flag dryRun=true e os contadores simulados.
+    const run = await prisma.m365SyncRun.findUniqueOrThrow({ where: { id: res.id } });
+    expect(run.dryRun).toBe(true);
+    expect(run.created).toBe(1);
+    expect(run.reactivated).toBe(1);
+    expect(run.deactivated).toBe(1);
   });
 
   it('grava um M365SyncRun com os contadores da execução', async () => {
