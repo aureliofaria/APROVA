@@ -72,7 +72,14 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     if (isAdmin && departmentId !== undefined) data.departmentId = departmentId;
     if (isAdmin && isActive !== undefined) data.isActive = isActive;
     if (isAdmin && requestPermissions !== undefined) data.requestPermissions = normalizeRequestPermissions(requestPermissions);
-    if (password) data.passwordHash = await bcrypt.hash(password, 10);
+    // Definir uma senha resolve o "needsPasswordSetup" de contas criadas pela
+    // sincronização M365/Entra ID — a partir daqui o login por senha funciona.
+    // Na prática, a PRIMEIRA senha só pode ser definida por um ADMIN: a conta
+    // bloqueada não consegue logar, logo não tem token para o caminho "self".
+    if (password) {
+      data.passwordHash = await bcrypt.hash(password, 10);
+      data.needsPasswordSetup = false;
+    }
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data,

@@ -27,6 +27,13 @@ router.post('/login', async (req: Request, res: Response) => {
       res.status(401).json({ error: 'Credenciais inválidas' });
       return;
     }
+    // Conta criada pela sincronização M365/Entra ID: sem senha local
+    // utilizável até um ADMIN definir uma (ver PUT /api/users/:id) — mensagem
+    // explícita em vez do "Credenciais inválidas" genérico.
+    if (user.needsPasswordSetup) {
+      res.status(401).json({ error: 'Conta sincronizada do M365 sem senha definida. Peça a um administrador para configurar sua senha de acesso.' });
+      return;
+    }
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
       res.status(401).json({ error: 'Credenciais inválidas' });

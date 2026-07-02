@@ -9,6 +9,8 @@ export function tokenFor(userId: string): string {
 
 // Limpa todas as tabelas respeitando as dependências de chave estrangeira.
 export async function resetDb() {
+  // Sync M365/Entra ID: tabela independente (sem FKs), pode sair em qualquer ordem.
+  await prisma.m365SyncRun.deleteMany();
   // Inventário primeiro: AssetMovement.createdById/assetId usam onDelete: RESTRICT,
   // então precisam sair antes de User/Asset.
   await prisma.assetMovement.deleteMany();
@@ -48,10 +50,29 @@ export async function resetDb() {
 }
 
 let seq = 0;
-export async function makeUser(role: string, name?: string) {
+export async function makeUser(
+  role: string,
+  name?: string,
+  overrides: Partial<{
+    email: string;
+    isActive: boolean;
+    origin: string;
+    externalId: string | null;
+    needsPasswordSetup: boolean;
+  }> = {}
+) {
   seq++;
   return prisma.user.create({
-    data: { name: name ?? `${role}-${seq}`, email: `u${seq}-${Date.now()}@test.com`, passwordHash: 'x', role },
+    data: {
+      name: name ?? `${role}-${seq}`,
+      email: overrides.email ?? `u${seq}-${Date.now()}@test.com`,
+      passwordHash: 'x',
+      role,
+      isActive: overrides.isActive ?? true,
+      origin: overrides.origin ?? 'LOCAL',
+      externalId: overrides.externalId,
+      needsPasswordSetup: overrides.needsPasswordSetup ?? false,
+    },
   });
 }
 
