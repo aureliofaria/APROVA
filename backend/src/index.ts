@@ -18,6 +18,7 @@ import reportsRouter from './routes/reports';
 import auditLogsRouter from './routes/audit-logs';
 import notificationsRouter from './routes/notifications';
 import financeParamsRouter from './routes/financeParams';
+import m365SyncRouter from './routes/m365Sync';
 import { processEscalations } from './services/workflow';
 
 const app = express();
@@ -71,6 +72,7 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/finance-params', financeParamsRouter);
+app.use('/api/admin/m365-sync', m365SyncRouter);
 
 // Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
 // próprio backend serve o build do frontend, deixando tudo na MESMA origem
@@ -95,6 +97,10 @@ if (require.main === module) {
   // Dispatcher de notificações externas (e-mail/Teams) — envia as PENDING.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require('./services/notificationDispatcher').startNotificationsDispatcher();
+  // Sincronização de usuários com o M365/Entra ID — gated por env (padrão
+  // dos demais agendadores in-process deste arquivo).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('./services/m365UserSync').startM365UserSyncScheduler();
 
   // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
   // quando o módulo é executado diretamente — sob teste o `app` é importado

@@ -63,6 +63,17 @@ export const config = {
   appUrl: process.env.APP_URL || '',
   // Teams (canal TEAMS) — Incoming Webhook do canal corporativo.
   teamsWebhookUrl: process.env.TEAMS_WEBHOOK_URL || '',
+  // Sincronização de usuários com o M365/Entra ID (fonte da verdade de quem
+  // pode acessar o APROVA). Reusa as credenciais GRAPH_* acima (mesma App
+  // Registration; requer permissão de aplicação User.Read.All + consent de
+  // admin). Gated: só liga com M365_USER_SYNC_ENABLED=true E Graph configurado.
+  m365Sync: {
+    enabled: process.env.M365_USER_SYNC_ENABLED === 'true',
+    // Intervalo do agendador in-process. Default 6h.
+    intervalMs: Number(process.env.M365_USER_SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000,
+    // Loga o que faria sem gravar nada (auditoria/validação antes de ligar de fato).
+    dryRun: process.env.M365_USER_SYNC_DRY_RUN === 'true',
+  },
 };
 
 // Transportes de e-mail configurados.
@@ -76,6 +87,10 @@ export const emailEnabled = (): boolean =>
   config.externalNotificationsEnabled && (graphConfigured() || smtpConfigured());
 export const teamsEnabled = (): boolean =>
   config.externalNotificationsEnabled && !!config.teamsWebhookUrl;
+
+// Sync M365 só liga com a env dedicada E credenciais Graph configuradas
+// (mesmo padrão de gate duplo dos canais externos acima).
+export const m365SyncEnabled = (): boolean => config.m365Sync.enabled && graphConfigured();
 
 // Papéis que podem atuar como aprovadores quando uma etapa não define alçada explícita.
 export const APPROVER_ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'] as const;
