@@ -71,7 +71,9 @@ export const config = {
     enabled: process.env.M365_USER_SYNC_ENABLED === 'true',
     // Intervalo do agendador in-process. Default 6h.
     intervalMs: Number(process.env.M365_USER_SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000,
-    // Loga o que faria sem gravar nada (auditoria/validação antes de ligar de fato).
+    // Calcula os contadores SEM gravar alterações de USUÁRIO. O registro da
+    // execução (M365SyncRun, flag dryRun=true) É gravado — observabilidade
+    // para o ADMIN validar os números (GET /status) antes de ligar de fato.
     dryRun: process.env.M365_USER_SYNC_DRY_RUN === 'true',
   },
 };
