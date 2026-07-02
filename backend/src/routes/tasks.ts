@@ -6,6 +6,7 @@ import { advanceRequest, processSlaExpiries, processEscalations, publishWorkflow
 import { notify } from '../services/notifications';
 import { isFunctionRole, isSectorQueueStep } from '../lib/queue';
 import { checklistUnmet } from '../lib/checklist';
+import { canViewRequest } from '../lib/visibility';
 
 const router = Router();
 
@@ -104,28 +105,33 @@ router.post('/process-sla', authenticate, async (req: AuthRequest, res: Response
   }
 });
 
-const WIDE_VIEW_ROLES = ['ADMIN', 'MANAGER', 'FINANCE', 'HR'];
-
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const task = await prisma.requestTask.findUnique({
       where: { id: req.params.id },
       include: {
-        request: { include: { flow: true, approvals: { select: { approverId: true } } } },
+        request: {
+          include: {
+            flow: true,
+            tasks: { select: { assigneeId: true } },
+            approvals: { select: { approverId: true } },
+          },
+        },
         assignee: { select: { id: true, name: true, email: true } },
         step: { include: { authLevels: true } },
         attachments: true,
       },
     });
     if (!task) { res.status(404).json({ error: 'Tarefa não encontrada' }); return; }
-    // IDOR: só o responsável, o iniciador, um aprovador da solicitação ou um
-    // papel de visão ampla pode ver a tarefa (revela valor/iniciador/anexos).
-    const involved =
-      WIDE_VIEW_ROLES.includes(req.user.role) ||
-      task.assigneeId === req.user.id ||
-      task.request.initiatorId === req.user.id ||
-      task.request.approvals.some((a) => a.approverId === req.user.id);
-    if (!involved) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    // IDOR: mesmo predicado de visibilidade do GET /requests/:id (lib/visibility)
+    // — responsável, iniciador, aprovador da solicitação ou escopo de
+    // setor/hierarquia. Removido o antigo bypass por papel (WIDE_VIEW_ROLES:
+    // ADMIN/MANAGER/FINANCE/HR viam QUALQUER tarefa sem vínculo — furo de
+    // visibilidade que deixava até o valor/anexos do pedido embutido vazarem).
+    if (!(await canViewRequest(req.user, task.request))) {
+      res.status(403).json({ error: 'Acesso negado' });
+      return;
+    }
     res.json(task);
   } catch {
     res.status(500).json({ error: 'Erro ao buscar tarefa' });
