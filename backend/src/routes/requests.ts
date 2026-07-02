@@ -923,38 +923,65 @@ router.post('/:id/retry-step', authenticate, async (req: AuthRequest, res: Respo
       res.status(409).json({ error: 'Solicitação não está travada' }); return;
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const { created, starvedStepId } = await createRequestTasks(request.id, request.flowId, request.currentStep, tx);
-      if (created > 0 && !starvedStepId) {
-        const step = request.flow.steps.find((s) => s.order === request.currentStep);
-        await tx.request.update({
-          where: { id: request.id },
-          data: { status: 'IN_PROGRESS', statusLabel: step?.statusLabel ?? null },
+    // Guarda otimista (espelha /resubmit — achado da Lupa): o findUnique acima
+    // roda FORA da transação, então dois cliques concorrentes podem ambos
+    // passar pela checagem de status e entrar aqui. A 1ª operação da transação
+    // reivindica a transição BLOCKED -> IN_PROGRESS com updateMany guardado no
+    // status atual; a 2ª chamada concorrente encontra count=0 (o status já
+    // mudou) e aborta com 409 — sem duplicar tarefas/AuditLog/notificação.
+    // Se a etapa continuar sem elegível, o status é revertido para BLOCKED
+    // dentro da MESMA transação, liberando uma nova tentativa legítima depois.
+    const RACE = Symbol('retry-step-race');
+    let result: { ok: true } | { ok: false; detail: string };
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const moved = await tx.request.updateMany({
+          where: { id: request.id, status: 'BLOCKED' },
+          data: { status: 'IN_PROGRESS' },
         });
+        if (moved.count === 0) throw RACE;
+
+        const { created, starvedStepId } = await createRequestTasks(request.id, request.flowId, request.currentStep, tx);
+        if (created > 0 && !starvedStepId) {
+          const step = request.flow.steps.find((s) => s.order === request.currentStep);
+          await tx.request.update({
+            where: { id: request.id },
+            data: { statusLabel: step?.statusLabel ?? null },
+          });
+          await tx.auditLog.create({
+            data: {
+              requestId: request.id, userId: req.user.id, userName: req.user.name,
+              action: 'REQUEST_UNBLOCKED',
+              details: `Etapa reprocessada com sucesso (${created} tarefa(s) criada(s))`,
+            },
+          });
+          return { ok: true as const };
+        }
+        // Ainda sem elegível: reverte a claim otimista — a solicitação
+        // permanece BLOCKED (nada de "meio-desbloqueada").
+        await tx.request.update({ where: { id: request.id }, data: { status: 'BLOCKED' } });
+        const detail = await describeStarvedStep(
+          tx,
+          starvedStepId ?? request.flow.steps.find((s) => s.order === request.currentStep)?.id ?? null,
+        );
         await tx.auditLog.create({
           data: {
             requestId: request.id, userId: req.user.id, userName: req.user.name,
-            action: 'REQUEST_UNBLOCKED',
-            details: `Etapa reprocessada com sucesso (${created} tarefa(s) criada(s))`,
+            action: 'RETRY_STEP_FAILED',
+            details: `Reprocessamento não resolveu elegíveis — ${detail}`,
           },
         });
-        return { ok: true as const };
-      }
-      const detail = await describeStarvedStep(
-        tx,
-        starvedStepId ?? request.flow.steps.find((s) => s.order === request.currentStep)?.id ?? null,
-      );
-      await tx.auditLog.create({
-        data: {
-          requestId: request.id, userId: req.user.id, userName: req.user.name,
-          action: 'RETRY_STEP_FAILED',
-          details: `Reprocessamento não resolveu elegíveis — ${detail}`,
-        },
+        return { ok: false as const, detail };
       });
-      return { ok: false as const, detail };
-    });
+    } catch (e) {
+      if (e === RACE) { res.status(409).json({ error: 'Solicitação não está travada' }); return; }
+      throw e;
+    }
 
-    if (!result.ok) {
+    // Narrowing via 'in' (não `!result.ok`): TS não preserva a união
+    // discriminada de uma variável atribuída dentro de um try/catch quando
+    // declarada fora dele — 'detail' in result narra corretamente.
+    if ('detail' in result) {
       res.status(409).json({ error: `Ainda sem usuário elegível: ${result.detail}` });
       return;
     }

@@ -127,5 +127,38 @@ describe('Fix 1 — etapa aplicável sem elegível trava a solicitação (BLOCKE
       const okLog = await prisma.auditLog.findFirst({ where: { requestId: req.id, action: 'REQUEST_UNBLOCKED' } });
       expect(okLog).not.toBeNull();
     });
+
+    // Achado da Lupa: o findUnique (checagem de status BLOCKED) rodava FORA da
+    // transação e o tx.request.update não tinha guarda otimista — duas
+    // chamadas concorrentes (double-click) passavam ambas pela checagem e
+    // ambas retornavam 200, duplicando tarefas/AuditLog/notificação. Corrigido
+    // com updateMany guardado em status='BLOCKED' como 1ª operação da
+    // transação (mesmo padrão do /resubmit).
+    it('idempotência: duas chamadas concorrentes — só uma reprocessa (200), a outra 409, sem duplicar tarefas', async () => {
+      const { admin, req } = await starvedRequest();
+      await completeCurrentStepTasks(req.id);
+      await advanceRequest(req.id);
+      expect((await prisma.request.findUniqueOrThrow({ where: { id: req.id } })).status).toBe('BLOCKED');
+
+      await makeUser('MANAGER'); // corrige o cadastro antes do double-click
+
+      const [r1, r2] = await Promise.all([
+        request(app).post(`/api/requests/${req.id}/retry-step`).set(auth(tokenFor(admin.id))).send({}),
+        request(app).post(`/api/requests/${req.id}/retry-step`).set(auth(tokenFor(admin.id))).send({}),
+      ]);
+
+      const statuses = [r1.status, r2.status].sort();
+      expect(statuses).toEqual([200, 409]);
+
+      const fresh = await prisma.request.findUniqueOrThrow({ where: { id: req.id } });
+      expect(fresh.status).toBe('IN_PROGRESS');
+
+      // Nenhuma duplicação: exatamente 1 tarefa criada para a etapa 1, e
+      // exatamente 1 AuditLog de sucesso.
+      const tasks = await prisma.requestTask.findMany({ where: { requestId: req.id, step: { order: 1 } } });
+      expect(tasks).toHaveLength(1);
+      const okLogs = await prisma.auditLog.findMany({ where: { requestId: req.id, action: 'REQUEST_UNBLOCKED' } });
+      expect(okLogs).toHaveLength(1);
+    });
   });
 });
