@@ -369,6 +369,27 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Campos que, embora não estejam no registro formal de PII de 1ª classe
+// (REQUEST_SENSITIVE_FIELDS, vazio hoje), carregam dado pessoal por convenção
+// (nome de colaborador) — o AuditLog de edição não ecoa o valor, só o fato de
+// terem mudado. Os demais campos operacionais logam antes → depois.
+const PUT_AUDIT_PII_FIELDS = new Set(['targetEmployee', 'replacementName']);
+
+// Calcula o diff dos campos editáveis via PUT /:id para o AuditLog. Ignora
+// campos não enviados (undefined — Prisma já os trata como "não altera") e
+// campos sem mudança efetiva.
+function diffRequestEdit(before: Record<string, any>, after: Record<string, any>): Record<string, any> {
+  const changed: Record<string, any> = {};
+  for (const key of Object.keys(after)) {
+    if (after[key] === undefined) continue;
+    const b = before[key] ?? null;
+    const a = after[key] ?? null;
+    if (b === a) continue;
+    changed[key] = PUT_AUDIT_PII_FIELDS.has(key) ? { changed: true } : { before: b, after: a };
+  }
+  return changed;
+}
+
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { title, description, targetEmployee, targetDepartment, startDate, amountCents, supplier, costCenter, justification } = req.body;
@@ -379,10 +400,51 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     if (request.initiatorId !== req.user.id && req.user.role !== 'ADMIN') {
       res.status(403).json({ error: 'Acesso negado' }); return;
     }
-    const updated = await prisma.request.update({
-      where: { id: req.params.id },
-      // Só altera o valor quando enviado no corpo; omitido não zera.
-      data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: 'amountCents' in req.body ? amount.value : undefined, supplier, costCenter, justification },
+
+    // Guarda de status (Fix 2 — auditoria Lupa): sem isto, dava para editar
+    // (inclusive amountCents) uma solicitação já COMPLETED, ou mudar o valor
+    // depois que um aprovador já decidiu sobre o valor antigo — sem abrir novo
+    // ciclo de aprovação. Só se edita quando: (a) devolvida para correção
+    // (AWAITING_CORRECTION — fluxo de correção/resubmit existente, preservado);
+    // ou (b) ainda na etapa 0, em andamento, e NENHUMA decisão foi registrada.
+    const isCorrection = request.status === 'AWAITING_CORRECTION';
+    let isEarlyNoDecision = false;
+    if (!isCorrection && request.status === 'IN_PROGRESS' && request.currentStep === 0) {
+      const decided = await prisma.approval.count({ where: { requestId: request.id } });
+      isEarlyNoDecision = decided === 0;
+    }
+    if (!isCorrection && !isEarlyNoDecision) {
+      res.status(409).json({ error: 'Solicitação não pode ser editada no status atual' }); return;
+    }
+
+    const nextAmount = 'amountCents' in req.body ? amount.value : undefined;
+    const before = {
+      title: request.title, description: request.description, targetEmployee: request.targetEmployee,
+      targetDepartment: request.targetDepartment, startDate: request.startDate, amountCents: request.amountCents,
+      supplier: request.supplier, costCenter: request.costCenter, justification: request.justification,
+    };
+    const after = {
+      title, description, targetEmployee, targetDepartment, startDate, amountCents: nextAmount,
+      supplier, costCenter, justification,
+    };
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const upd = await tx.request.update({
+        where: { id: req.params.id },
+        // Só altera o valor quando enviado no corpo; omitido não zera.
+        data: { title, description, targetEmployee, targetDepartment, startDate, amountCents: nextAmount, supplier, costCenter, justification },
+      });
+      const changed = diffRequestEdit(before, after);
+      if (Object.keys(changed).length > 0) {
+        await tx.auditLog.create({
+          data: {
+            requestId: req.params.id, userId: req.user.id, userName: req.user.name,
+            action: 'REQUEST_EDITED',
+            details: JSON.stringify(changed),
+          },
+        });
+      }
+      return upd;
     });
     res.json(updated);
   } catch {
