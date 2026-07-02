@@ -226,7 +226,7 @@ export default function MyTasks() {
                 info?.overdue ? 'border-red-200' : info?.warning ? 'border-amber-200' : 'border-gray-200'
               } ${isChecked ? 'ring-2 ring-golplus-blue-300' : ''}`}
             >
-              <div className="flex items-start gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-start gap-3">
                 {isActive && (
                   <input
                     type="checkbox"
@@ -250,20 +250,20 @@ export default function MyTasks() {
                   {task.description && <p className="text-xs text-gray-500 mt-1">{task.description}</p>}
                   {task.notes && <p className="text-xs text-gray-400 mt-1 italic">Obs: {task.notes}</p>}
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-wrap self-end sm:self-auto sm:flex-shrink-0">
                   {task.status === 'PENDING' && (
-                    <button onClick={() => claimMutation.mutate(task.id)} disabled={claimMutation.isPending} className="px-3 py-1.5 bg-golplus-blue text-white rounded-lg text-xs font-medium hover:bg-golplus-blue-800 disabled:opacity-50">
+                    <button onClick={() => claimMutation.mutate(task.id)} disabled={claimMutation.isPending} className="min-h-[44px] px-3 flex items-center justify-center bg-golplus-blue text-white rounded-lg text-xs font-medium hover:bg-golplus-blue-800 disabled:opacity-50">
                       Assumir
                     </button>
                   )}
                   {isActive && (
                     <>
-                      <button onClick={() => setCompleteTaskId(task.id)} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700">
+                      <button onClick={() => setCompleteTaskId(task.id)} className="min-h-[44px] px-3 flex items-center justify-center bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700">
                         Concluir
                       </button>
                       <button
                         onClick={() => { if (confirm('Deseja rejeitar esta tarefa?')) rejectMutation.mutate(task.id); }}
-                        className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700"
+                        className="min-h-[44px] px-3 flex items-center justify-center bg-red-600 text-white rounded-lg text-xs font-medium hover:bg-red-700"
                       >
                         Rejeitar
                       </button>

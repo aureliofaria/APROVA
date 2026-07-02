@@ -18,6 +18,8 @@ import reportsRouter from './routes/reports';
 import auditLogsRouter from './routes/audit-logs';
 import notificationsRouter from './routes/notifications';
 import financeParamsRouter from './routes/financeParams';
+import m365SyncRouter from './routes/m365Sync';
+import attachmentsRouter from './routes/attachments';
 import { processEscalations } from './services/workflow';
 
 const app = express();
@@ -34,17 +36,10 @@ app.use(helmet());
 app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 
-// Anexos: servidos como download (attachment) e nunca renderizados inline,
-// mitigando XSS armazenado caso um arquivo de tipo perigoso seja servido.
-app.use(
-  '/uploads',
-  express.static(process.env.UPLOAD_DIR || path.join(__dirname, '../uploads'), {
-    setHeaders: (res) => {
-      res.setHeader('Content-Disposition', 'attachment');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-    },
-  })
-);
+// Anexos: NÃO servidos como estáticos públicos — qualquer pessoa com a URL
+// (nem precisava estar logada) conseguia baixar o arquivo, violando o vínculo
+// de visibilidade da solicitação. O download agora exige autenticação e o
+// mesmo predicado de acesso do GET /requests/:id — ver routes/attachments.ts.
 
 // Limitador de tentativas em endpoints sensíveis de autenticação (brute force).
 const authLimiter = rateLimit({
@@ -71,15 +66,17 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/finance-params', financeParamsRouter);
+app.use('/api/admin/m365-sync', m365SyncRouter);
+app.use('/api/attachments', attachmentsRouter);
 
 // Deploy de processo único (V1 / rede interna): quando SERVE_FRONTEND=true, o
 // próprio backend serve o build do frontend, deixando tudo na MESMA origem
-// (http://<ip>:porta) — sem necessidade de nginx. Mantém /api e /uploads
-// intactos (já registrados acima) e faz fallback de SPA para as demais rotas.
+// (http://<ip>:porta) — sem necessidade de nginx. Mantém /api intacto (já
+// registrado acima) e faz fallback de SPA para as demais rotas.
 if (process.env.SERVE_FRONTEND === 'true') {
   const frontendDist = path.resolve(__dirname, '../../frontend/dist');
   app.use(express.static(frontendDist));
-  app.get(/^\/(?!api\/|uploads\/).*/, (_req, res) => {
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
 }
@@ -95,6 +92,10 @@ if (require.main === module) {
   // Dispatcher de notificações externas (e-mail/Teams) — envia as PENDING.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require('./services/notificationDispatcher').startNotificationsDispatcher();
+  // Sincronização de usuários com o M365/Entra ID — gated por env (padrão
+  // dos demais agendadores in-process deste arquivo).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('./services/m365UserSync').startM365UserSyncScheduler();
 
   // Agendador in-process do escalonamento temporal (Fase 0 · Passo 11). Só roda
   // quando o módulo é executado diretamente — sob teste o `app` é importado

@@ -15,6 +15,8 @@ const statusMap: Record<string, { label: string; className: string }> = {
   ALLOCATED: { label: 'Alocado', className: 'bg-teal-100 text-teal-800' },
   RETURNED: { label: 'Devolvido', className: 'bg-amber-100 text-amber-800' },
   CANCELLED: { label: 'Cancelado', className: 'bg-gray-100 text-gray-500' },
+  // Etapa aplicável sem aprovador ativo — solicitação travada (Fix 1 — auditoria).
+  BLOCKED: { label: 'Travada — sem aprovador', className: 'bg-red-100 text-red-800' },
   // Task statuses (some overlap)
   CHANGES_REQUESTED: { label: 'Revisão Solicitada', className: 'bg-amber-100 text-amber-800' },
 };
@@ -24,6 +26,7 @@ const flowTypeMap: Record<string, { label: string; className: string }> = {
   OFFBOARDING: { label: 'Desligamento', className: 'bg-red-100 text-red-800' },
   PAYMENT: { label: 'Pagamento', className: 'bg-golplus-blue-100 text-golplus-blue-800' },
   PURCHASE: { label: 'Compra', className: 'bg-purple-100 text-purple-800' },
+  CHAMADO: { label: 'Chamado', className: 'bg-amber-100 text-amber-800' },
 };
 
 export function StatusBadge({ status, size = 'sm' }: StatusBadgeProps) {

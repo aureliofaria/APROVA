@@ -101,12 +101,12 @@ export default function Dashboard() {
             )}
             {recent.map((req) => (
               <Link key={req.id} to={`/requests/${req.id}`} className="block px-5 py-3 hover:bg-gray-50 transition-colors">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{req.title}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{req.initiator?.name} · {req.flow?.name}</p>
                   </div>
-                  <div className="ml-4 flex items-center gap-2 flex-shrink-0">
+                  <div className="sm:ml-4 flex items-center gap-2 flex-shrink-0">
                     {req.statusLabel
                       ? <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-golplus-blue-100 text-golplus-blue-800" title={req.status}>{req.statusLabel}</span>
                       : <StatusBadge status={req.status} />}

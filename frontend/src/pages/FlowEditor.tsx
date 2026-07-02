@@ -270,10 +270,10 @@ export default function FlowEditor() {
             <div className="flex items-center gap-3 mb-4">
               <span className="w-7 h-7 bg-golplus-blue-100 text-golplus-blue-700 rounded-full flex items-center justify-center text-sm font-bold">{idx + 1}</span>
               <h3 className="font-medium text-gray-900 flex-1">{step.name || 'Nova etapa'}</h3>
-              <div className="flex gap-1">
-                <button onClick={() => moveStep(idx, -1)} disabled={idx === 0} className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30">↑</button>
-                <button onClick={() => moveStep(idx, 1)} disabled={idx === steps.length - 1} className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-30">↓</button>
-                <button onClick={() => removeStep(idx)} className="p-1 text-red-400 hover:text-red-600">✕</button>
+              <div className="flex gap-1.5">
+                <button onClick={() => moveStep(idx, -1)} disabled={idx === 0} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-30" title="Mover para cima">↑</button>
+                <button onClick={() => moveStep(idx, 1)} disabled={idx === steps.length - 1} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-30" title="Mover para baixo">↓</button>
+                <button onClick={() => removeStep(idx)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Remover etapa">✕</button>
               </div>
             </div>
 
@@ -348,8 +348,7 @@ export default function FlowEditor() {
               </div>
               <div className="space-y-2">
                 {(step.conditions || []).map((cond: any, condIdx: number) => (
-                  <div key={condIdx} className="bg-gray-50 rounded-lg p-3 grid grid-cols-2 md:grid-cols-4 gap-2 relative">
-                    <button onClick={() => removeCondition(idx, condIdx)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-xs">×</button>
+                  <div key={condIdx} className="bg-gray-50 rounded-lg p-3 grid grid-cols-2 md:grid-cols-5 gap-2 items-end">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Campo</label>
                       <select value={cond.field} onChange={(e) => updateCondition(idx, condIdx, 'field', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
@@ -358,7 +357,7 @@ export default function FlowEditor() {
                         <option value="amount">Valor (amount)</option>
                       </select>
                     </div>
-                    {cond.field !== 'always' && (
+                    {cond.field !== 'always' ? (
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Operador</label>
                         <select value={cond.op} onChange={(e) => updateCondition(idx, condIdx, 'op', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500">
@@ -369,16 +368,26 @@ export default function FlowEditor() {
                           <option value="LTE">Menor ou igual</option>
                         </select>
                       </div>
+                    ) : (
+                      // Placeholder invisível: some no mobile (2 col já ficam corretas com
+                      // Campo + Ir para etapa) mas preserva o alinhamento das colunas no
+                      // desktop (md:grid-cols-5) quando "Sempre" oculta Operador/Valor.
+                      <div className="hidden md:block" aria-hidden="true" />
                     )}
-                    {cond.field !== 'always' && (
+                    {cond.field !== 'always' ? (
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Valor</label>
                         <input type="text" value={cond.value || ''} onChange={(e) => updateCondition(idx, condIdx, 'value', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="Ex: REPLACEMENT" />
                       </div>
+                    ) : (
+                      <div className="hidden md:block" aria-hidden="true" />
                     )}
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Ir para etapa de ordem</label>
                       <input type="number" min="0" value={cond.targetOrder ?? 0} onChange={(e) => updateCondition(idx, condIdx, 'targetOrder', parseInt(e.target.value) || 0)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" />
+                    </div>
+                    <div className="col-span-2 md:col-span-1 flex justify-end">
+                      <button onClick={() => removeCondition(idx, condIdx)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg text-xs" title="Remover regra" aria-label="Remover regra">×</button>
                     </div>
                   </div>
                 ))}
@@ -400,7 +409,7 @@ export default function FlowEditor() {
                       <input type="text" value={lvl.name} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'name', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="Ex: Até R$ 5.000" />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Valor mín.</label>
+                      <label className="block text-xs text-gray-500 mb-1 pr-6">Valor mín.</label>
                       <input type="number" value={lvl.minValue} onChange={(e) => updateAuthLevel(idx, lvlIdx, 'minValue', e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-golplus-blue-500" placeholder="0" />
                     </div>
                     <div>

@@ -13,7 +13,10 @@ export type NotificationEvent =
   | 'REQUEST_FORWARDED'
   | 'TASK_CLAIMED'
   | 'TASK_DELAY_REMINDER'
-  | 'TASK_ESCALATED_TO_LEADER';
+  | 'TASK_ESCALATED_TO_LEADER'
+  // Fix 1 (auditoria Lupa): etapa aplicável sem elegível trava a solicitação —
+  // alerta os ADMINs para corrigirem o cadastro e reprocessarem (retry-step).
+  | 'REQUEST_BLOCKED';
 
 const EXTERNAL_CHANNELS = ['TEAMS', 'OUTLOOK'] as const;
 
@@ -29,6 +32,7 @@ const EMAIL_DEFAULT_EVENTS: ReadonlySet<NotificationEvent> = new Set([
   'REQUEST_FORWARDED',
   'TASK_DELAY_REMINDER',
   'TASK_ESCALATED_TO_LEADER',
+  'REQUEST_BLOCKED',
 ]);
 
 interface NotifyInput {

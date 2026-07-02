@@ -174,13 +174,13 @@ function SectorCard({ sector }: { sector: Sector }) {
   return (
     <div className={`bg-white rounded-2xl border shadow-sm transition-all ${sector.isActive ? 'border-gray-200' : 'border-dashed border-gray-300 opacity-70'}`}>
       {/* Header */}
-      <div className="flex items-center gap-4 p-5">
-        <div className="w-10 h-10 rounded-xl bg-golplus-blue-100 flex items-center justify-center text-golplus-blue-700 font-bold text-lg">
+      <div className="flex flex-wrap items-center gap-4 p-5">
+        <div className="w-10 h-10 rounded-xl bg-golplus-blue-100 flex items-center justify-center text-golplus-blue-700 font-bold text-lg flex-shrink-0">
           {sector.name.charAt(0).toUpperCase()}
         </div>
 
         {editing ? (
-          <div className="flex-1 flex gap-2">
+          <div className="flex-1 min-w-[200px] flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -192,11 +192,13 @@ function SectorCard({ sector }: { sector: Sector }) {
               placeholder="Descrição..."
               className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none"
             />
-            <button onClick={() => updateMut.mutate()} className="px-3 py-1.5 bg-golplus-blue text-white rounded-lg text-sm">Salvar</button>
-            <button onClick={() => { setEditing(false); setName(sector.name); setDescription(sector.description || ''); }} className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm">✕</button>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => updateMut.mutate()} className="px-3 py-1.5 bg-golplus-blue text-white rounded-lg text-sm">Salvar</button>
+              <button onClick={() => { setEditing(false); setName(sector.name); setDescription(sector.description || ''); }} className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm">✕</button>
+            </div>
           </div>
         ) : (
-          <div className="flex-1">
+          <div className="flex-1 min-w-[140px]">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-gray-900">{sector.name}</span>
               {!sector.isActive && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Inativo</span>}
@@ -205,37 +207,40 @@ function SectorCard({ sector }: { sector: Sector }) {
           </div>
         )}
 
-        <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span className="flex items-center gap-1" title="Líder I">
-            <span className="w-2 h-2 bg-golplus-blue rounded-full" />{lider1.length} L-I
-          </span>
-          <span className="flex items-center gap-1" title="Líder II">
-            <span className="w-2 h-2 bg-golplus-blue-400 rounded-full" />{lider2.length} L-II
-          </span>
-          <span className="flex items-center gap-1" title="Membros">
-            <span className="w-2 h-2 bg-golplus-orange rounded-full" />{membros.length} memb.
-          </span>
-        </div>
+        {/* Contadores + ações: em telas estreitas, viram uma segunda linha alinhada à direita. */}
+        <div className="w-full sm:w-auto flex items-center justify-end gap-3">
+          <div className="flex items-center gap-3 text-xs text-gray-500">
+            <span className="flex items-center gap-1" title="Líder I">
+              <span className="w-2 h-2 bg-golplus-blue rounded-full" />{lider1.length} L-I
+            </span>
+            <span className="flex items-center gap-1" title="Líder II">
+              <span className="w-2 h-2 bg-golplus-blue-400 rounded-full" />{lider2.length} L-II
+            </span>
+            <span className="flex items-center gap-1" title="Membros">
+              <span className="w-2 h-2 bg-golplus-orange rounded-full" />{membros.length} memb.
+            </span>
+          </div>
 
-        <div className="flex items-center gap-1">
-          {!editing && (
-            <button onClick={() => setEditing(true)} className="p-1.5 text-gray-400 hover:text-golplus-blue rounded-lg hover:bg-golplus-blue-50" title="Editar">
-              ✏️
+          <div className="flex items-center gap-1">
+            {!editing && (
+              <button onClick={() => setEditing(true)} className="min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-golplus-blue rounded-lg hover:bg-golplus-blue-50" title="Editar">
+                ✏️
+              </button>
+            )}
+            <button onClick={() => toggleMut.mutate()} className="min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50" title={sector.isActive ? 'Desativar' : 'Ativar'}>
+              {sector.isActive ? '🔒' : '🔓'}
             </button>
-          )}
-          <button onClick={() => toggleMut.mutate()} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-50" title={sector.isActive ? 'Desativar' : 'Ativar'}>
-            {sector.isActive ? '🔒' : '🔓'}
-          </button>
-          <button
-            onClick={() => { if (window.confirm(`Remover setor "${sector.name}"?`)) deleteMut.mutate(); }}
-            className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
-            title="Excluir"
-          >
-            🗑️
-          </button>
-          <button onClick={() => setExpanded(!expanded)} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-50">
-            {expanded ? '▲' : '▼'}
-          </button>
+            <button
+              onClick={() => { if (window.confirm(`Remover setor "${sector.name}"?`)) deleteMut.mutate(); }}
+              className="min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+              title="Excluir"
+            >
+              🗑️
+            </button>
+            <button onClick={() => setExpanded(!expanded)} className="min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-50">
+              {expanded ? '▲' : '▼'}
+            </button>
+          </div>
         </div>
       </div>
 

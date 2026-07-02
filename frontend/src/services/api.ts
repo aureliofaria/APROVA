@@ -17,7 +17,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // Não redireciona quando o próprio POST /auth/login falhar (credenciais
+    // inválidas): isso já deixaria a tela de login, matando o toast de erro
+    // antes do usuário conseguir lê-lo. O catch do Login.tsx trata esse caso.
+    const isLoginRequest = typeof err.config?.url === 'string' && err.config.url.includes('/auth/login');
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('aprova_token');
       localStorage.removeItem('aprova_user');
       window.location.href = '/login';
@@ -118,6 +122,9 @@ export const requestsApi = {
   ) => api.post(`/requests/${id}/decision`, payload).then((r) => r.data),
   // Reenvio pelo iniciador quando a solicitação está AWAITING_CORRECTION.
   resubmit: (id: string) => api.post(`/requests/${id}/resubmit`).then((r) => r.data),
+  // ADMIN reprocessa a etapa de uma solicitação BLOCKED (etapa aplicável sem
+  // aprovador ativo) — Fix 1 · auditoria Lupa.
+  retryStep: (id: string) => api.post<Request>(`/requests/${id}/retry-step`).then((r) => r.data),
   // Grava valores de campos dinâmicos de uma etapa (resposta não ecoa valores).
   saveFields: (id: string, stepOrder: number, values: { fieldId: string; value: string }[]) =>
     api.post<{ ok: boolean; count: number; savedFieldIds: string[] }>(`/requests/${id}/fields`, { stepOrder, values }).then((r) => r.data),
@@ -140,6 +147,13 @@ export const requestsApi = {
   getComments: (id: string) => api.get<Comment[]>(`/requests/${id}/comments`).then((r) => r.data),
   addComment: (id: string, body: string, stepOrder?: number | null) =>
     api.post<Comment>(`/requests/${id}/comments`, { body, stepOrder }).then((r) => r.data),
+};
+
+// Anexos — download autenticado (substitui o antigo link direto para
+// /uploads/<fileName>, que era público e não checava vínculo com a solicitação).
+export const attachmentsApi = {
+  download: (id: string) =>
+    api.get(`/attachments/${id}/download`, { responseType: 'blob' }).then((r) => r.data as Blob),
 };
 
 // Pagamentos — recorrências

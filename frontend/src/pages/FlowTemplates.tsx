@@ -53,7 +53,7 @@ export default function FlowTemplates() {
             <h3 className="font-semibold text-gray-900 mb-1">{flow.name}</h3>
             {flow.description && <p className="text-sm text-gray-500 mb-3">{flow.description}</p>}
             <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-gray-400">{flow._count?.steps || 0} etapas</span>
+              <span className="text-xs text-gray-400">{flow._count?.steps || 0} {flow._count?.steps === 1 ? 'etapa' : 'etapas'}</span>
               <div className="flex gap-2">
                 <Link to={`/flows/${flow.id}/edit`} className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50">
                   Editar

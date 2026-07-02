@@ -84,13 +84,16 @@ export default function FileUpload({ onUpload, accept, maxFiles = 10, label = 'A
       )}
 
       {files.length > 0 && (
-        <button
-          onClick={handleUpload}
-          disabled={uploading}
-          className="w-full py-2 px-4 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {uploading ? 'Enviando...' : `Enviar ${files.length} arquivo(s)`}
-        </button>
+        <>
+          <p className="text-xs text-gray-500">Clique em "Enviar" para salvar o(s) anexo(s) — selecionar o arquivo ainda não o envia.</p>
+          <button
+            onClick={handleUpload}
+            disabled={uploading}
+            className="w-full py-2 px-4 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {uploading ? 'Enviando...' : `Enviar ${files.length} arquivo(s)`}
+          </button>
+        </>
       )}
     </div>
   );
