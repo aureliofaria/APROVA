@@ -367,3 +367,90 @@ describe('Passo 7 — campos dinâmicos por etapa', () => {
     });
   });
 });
+
+// ============================================================================
+// FIX (achado BLOQUEADOR da Sonda): GET /requests/:id não incluía `formFields`
+// no include das etapas do fluxo (só authLevels/checklistItems) — o painel
+// "Preencher dados desta etapa" do RequestDetail (canFillFields) nunca
+// renderizava para etapas > 0, travando QUALQUER fluxo com FormField
+// obrigatório fora da etapa 0 (ex.: Admissão · RH — expected_start_date):
+// /complete falhava com 400 e a UI não oferecia onde preencher o campo.
+// ============================================================================
+describe('Fix — GET /requests/:id inclui formFields das etapas (não só a 0)', () => {
+  beforeEach(resetDb);
+
+  async function flowComDuasEtapas() {
+    const flow = await makeFlow('ONBOARDING', [{ order: 0 }, { order: 1, requiredRole: 'RH' }]);
+    const step1 = await prisma.flowStep.findFirstOrThrow({ where: { flowTemplateId: flow.id, order: 1 } });
+    const field = await prisma.formField.create({
+      data: { flowStepId: step1.id, key: 'expected_start_date', label: 'Data prevista de início', type: 'DATE', required: true },
+    });
+    return { flow, step1, field };
+  }
+
+  it('formFields de uma etapa > 0 vêm no GET /requests/:id', async () => {
+    const admin = await makeUser('ADMIN');
+    const initiator = await makeUser('USER');
+    const { flow, field } = await flowComDuasEtapas();
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 1 },
+    });
+
+    const res = await request(app).get(`/api/requests/${req.id}`).set(auth(tokenFor(admin.id)));
+    expect(res.status).toBe(200);
+    const stepBody = res.body.flow.steps.find((s: any) => s.order === 1);
+    expect(stepBody.formFields).toBeDefined();
+    expect(stepBody.formFields.map((f: any) => f.id)).toContain(field.id);
+    expect(stepBody.formFields.find((f: any) => f.id === field.id).key).toBe('expected_start_date');
+  });
+
+  it('formFields não vazam RequestFieldValue (só a DEFINIÇÃO do campo, sem valor)', async () => {
+    const admin = await makeUser('ADMIN');
+    const initiator = await makeUser('USER');
+    const { flow, field } = await flowComDuasEtapas();
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 1 },
+    });
+    await prisma.requestFieldValue.create({ data: { requestId: req.id, fieldId: field.id, value: '2026-08-01' } });
+
+    const res = await request(app).get(`/api/requests/${req.id}`).set(auth(tokenFor(admin.id)));
+    const stepBody = res.body.flow.steps.find((s: any) => s.order === 1);
+    const fieldBody = stepBody.formFields.find((f: any) => f.id === field.id);
+    // A DEFINIÇÃO não carrega `value`/`values` — o valor preenchido só existe
+    // (mascarado quando sensível) em request.fieldValues, canal já auditado.
+    expect(fieldBody.value).toBeUndefined();
+    expect(fieldBody.values).toBeUndefined();
+  });
+
+  it('ciclo completo: campo obrigatório na etapa 1 trava /complete até ser preenchido via /fields', async () => {
+    const rh = await makeUser('RH');
+    const initiator = await makeUser('USER');
+    const { flow, step1, field } = await flowComDuasEtapas();
+    const req = await prisma.request.create({
+      data: { flowId: flow.id, initiatorId: initiator.id, title: 't', status: 'IN_PROGRESS', currentStep: 1 },
+    });
+    const task = await prisma.requestTask.create({
+      data: { requestId: req.id, stepId: step1.id, assigneeId: rh.id, title: 'Avaliação RH', status: 'PENDING' },
+    });
+
+    // GET /requests/:id expõe o campo — é o que o painel do RequestDetail usa.
+    const getRes = await request(app).get(`/api/requests/${req.id}`).set(auth(tokenFor(rh.id)));
+    expect(getRes.status).toBe(200);
+    const stepBody = getRes.body.flow.steps.find((s: any) => s.order === 1);
+    expect(stepBody.formFields).toHaveLength(1);
+
+    // Sem preencher: /complete falha 400 com o campo faltante.
+    const failComplete = await request(app).post(`/api/tasks/${task.id}/complete`).set(auth(tokenFor(rh.id))).send({});
+    expect(failComplete.status).toBe(400);
+    expect(failComplete.body.missing).toContain('expected_start_date');
+
+    // Preenche via POST /requests/:id/fields (o mesmo endpoint que o painel usa).
+    const fill = await request(app).post(`/api/requests/${req.id}/fields`).set(auth(tokenFor(rh.id)))
+      .send({ stepOrder: 1, values: [{ fieldId: field.id, value: '2026-08-01' }] });
+    expect(fill.status).toBe(200);
+
+    // Agora /complete passa.
+    const okComplete = await request(app).post(`/api/tasks/${task.id}/complete`).set(auth(tokenFor(rh.id))).send({});
+    expect(okComplete.status).toBe(200);
+  });
+});

@@ -98,6 +98,13 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
               include: {
                 authLevels: true,
                 checklistItems: { orderBy: { order: 'asc' } },
+                // Sem isto, o painel "Preencher dados desta etapa" do
+                // RequestDetail (canFillFields) nunca via os campos de etapas
+                // > 0 — travando qualquer fluxo com FormField obrigatório fora
+                // da etapa 0 (ex.: Admissão · RH — expected_start_date).
+                // Só DEFINIÇÕES de campo (sem valor — sem PII); os valores
+                // preenchidos continuam vindo mascarados via fieldValues.
+                formFields: { orderBy: { order: 'asc' } },
               },
             },
           },
