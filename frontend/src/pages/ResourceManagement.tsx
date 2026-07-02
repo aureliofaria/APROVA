@@ -252,15 +252,17 @@ export default function ResourceManagement() {
                     </div>
                   </div>
                 ) : (
-                  <div key={r.id} className={`flex items-center gap-3 p-3 rounded-lg border ${r.isActive ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
-                    <span className="flex-1 text-sm text-gray-800 font-medium">{r.name}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeBadgeClass(r.type)}`}>{typeLabel(r.type)}</span>
-                    {r.sector && (<span className="px-2 py-0.5 bg-golplus-blue-50 text-golplus-blue-700 rounded-full text-xs">{r.sector.name}</span>)}
-                    {r.selectionGroup && (<span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs" title="Grupo de exclusão (escolher só um)">grupo: {r.selectionGroup}</span>)}
-                    {r.dependsOnId && (<span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs" title="Só aparece se o item-pai for escolhido">depende de {resources.find((x) => x.id === r.dependsOnId)?.name ?? '—'}</span>)}
-                    <button onClick={() => handleToggleActive(r)} className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${r.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{r.isActive ? 'Ativo' : 'Inativo'}</button>
-                    <button onClick={() => startEdit(r)} className="text-xs text-gray-400 hover:text-gray-600">Editar</button>
-                    <button onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending} className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50">Excluir</button>
+                  <div key={r.id} className={`flex flex-wrap items-center gap-2 p-3 rounded-lg border ${r.isActive ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
+                    <span className="w-full sm:w-auto sm:flex-1 min-w-0 text-sm text-gray-800 font-medium truncate">{r.name}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${typeBadgeClass(r.type)}`}>{typeLabel(r.type)}</span>
+                    {r.sector && (<span className="px-2 py-0.5 bg-golplus-blue-50 text-golplus-blue-700 rounded-full text-xs whitespace-nowrap">{r.sector.name}</span>)}
+                    {r.selectionGroup && (<span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs whitespace-nowrap" title="Grupo de exclusão (escolher só um)">grupo: {r.selectionGroup}</span>)}
+                    {r.dependsOnId && (<span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs whitespace-nowrap" title="Só aparece se o item-pai for escolhido">depende de {resources.find((x) => x.id === r.dependsOnId)?.name ?? '—'}</span>)}
+                    <button onClick={() => handleToggleActive(r)} className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${r.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{r.isActive ? 'Ativo' : 'Inativo'}</button>
+                    <div className="w-full sm:w-auto flex justify-end sm:justify-start gap-3">
+                      <button onClick={() => startEdit(r)} className="text-xs text-gray-400 hover:text-gray-600 py-1">Editar</button>
+                      <button onClick={() => deleteMutation.mutate(r.id)} disabled={deleteMutation.isPending} className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50 py-1">Excluir</button>
+                    </div>
                   </div>
                 )
               ))}

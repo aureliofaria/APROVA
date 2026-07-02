@@ -17,7 +17,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // Não redireciona quando o próprio POST /auth/login falhar (credenciais
+    // inválidas): isso já deixaria a tela de login, matando o toast de erro
+    // antes do usuário conseguir lê-lo. O catch do Login.tsx trata esse caso.
+    const isLoginRequest = typeof err.config?.url === 'string' && err.config.url.includes('/auth/login');
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('aprova_token');
       localStorage.removeItem('aprova_user');
       window.location.href = '/login';

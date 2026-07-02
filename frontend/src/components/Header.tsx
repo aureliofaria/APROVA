@@ -6,7 +6,7 @@ interface HeaderProps {
 
 export default function Header({ title, subtitle, actions }: HeaderProps) {
   return (
-    <div className="flex items-center justify-between mb-6">
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
         {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}

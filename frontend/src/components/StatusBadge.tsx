@@ -26,6 +26,7 @@ const flowTypeMap: Record<string, { label: string; className: string }> = {
   OFFBOARDING: { label: 'Desligamento', className: 'bg-red-100 text-red-800' },
   PAYMENT: { label: 'Pagamento', className: 'bg-golplus-blue-100 text-golplus-blue-800' },
   PURCHASE: { label: 'Compra', className: 'bg-purple-100 text-purple-800' },
+  CHAMADO: { label: 'Chamado', className: 'bg-amber-100 text-amber-800' },
 };
 
 export function StatusBadge({ status, size = 'sm' }: StatusBadgeProps) {

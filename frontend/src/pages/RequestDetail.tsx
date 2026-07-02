@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { auditActionLabel } from '../lib/auditActions';
 import type { Request, FlowStep, RequestTask } from '../types';
 
 // Mensagem de erro amigável vinda do backend (axios). Trata 400 de campo/checklist
@@ -18,14 +19,21 @@ function apiError(e: any, fallback: string): string {
   return e?.response?.data?.error || fallback;
 }
 
+// Rótulo pt-BR para valores canônicos sim/não usados pelos campos needs_* (ver
+// NewRequest.tsx) — evita mostrar o valor bruto em minúsculas na revisão.
+const BOOLEAN_LABELS: Record<string, string> = { sim: 'Sim', nao: 'Não' };
+
 // Rótulo legível para o valor de um campo dinâmico (resolve SELECT → label).
 function displayFieldValue(fv: { value: string; field: { type: string; options?: string | null } }): string {
   if (fv.value === '' || fv.value == null) return '—';
+  // sim/nao sempre viram Sim/Não: opções cruas (['sim','nao'], sem {value,label})
+  // são tituladas ingenuamente por parseFieldOptions ("Nao", sem cedilha), então o
+  // rótulo canônico tem prioridade sobre o label derivado antes de cair pro bruto.
   if (fv.field.type === 'SELECT') {
     const opt = parseFieldOptions(fv.field as any).find((o) => o.value === fv.value);
-    return opt?.label ?? fv.value;
+    return BOOLEAN_LABELS[fv.value] ?? opt?.label ?? fv.value;
   }
-  return fv.value;
+  return BOOLEAN_LABELS[fv.value] ?? fv.value;
 }
 
 const formatCurrency = (cents?: number) =>
@@ -535,7 +543,14 @@ export default function RequestDetail() {
   };
 
   if (isLoading) return <div className="text-center py-12 text-gray-500">Carregando...</div>;
-  if (!request) return <div className="text-center py-12 text-gray-500">Solicitação não encontrada</div>;
+  if (!request) return (
+    <div className="text-center py-12">
+      <p className="text-gray-500 mb-4">Solicitação não encontrada</p>
+      <Link to="/requests" className="text-sm text-golplus-blue-600 hover:text-golplus-blue-800 inline-flex items-center gap-1">
+        ← Voltar para Solicitações
+      </Link>
+    </div>
+  );
 
   const canApprove = ['ADMIN', 'MANAGER', 'FINANCE'].includes(user?.role || '');
   const canCancel = user?.id === request.initiatorId || user?.role === 'ADMIN';
@@ -590,7 +605,7 @@ export default function RequestDetail() {
         <Link to="/requests" className="text-sm text-golplus-blue-600 hover:text-golplus-blue-800 flex items-center gap-1 mb-4">
           ← Voltar para Solicitações
         </Link>
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             {request.parentRequestId && (
               <Link to={`/requests/${request.parentRequestId}`} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 mb-1 inline-block">
@@ -611,7 +626,7 @@ export default function RequestDetail() {
               <span className="text-sm text-gray-400">{format(new Date(request.createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
             </div>
           </div>
-          <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+          <div className="flex gap-2 flex-wrap justify-end">
             {/* Responsável da etapa corrente: assumir (fila) e concluir. */}
             {claimableTask && (
               <button onClick={() => claimMutation.mutate(claimableTask.id)} disabled={claimMutation.isPending} className="px-4 py-2 bg-golplus-blue-600 text-white rounded-lg text-sm font-medium hover:bg-golplus-blue-700 disabled:opacity-50">Assumir</button>
@@ -643,38 +658,50 @@ export default function RequestDetail() {
 
       {/* Progress Steps */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4">Progresso do Fluxo</h3>
-        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-700">Progresso do Fluxo</h3>
           {(() => {
-            // Etapas EFETIVAMENTE percorridas (têm tarefa criada) ou com aprovação
-            // registrada — usado para distinguir "concluída" de "pulada" (branch).
-            const visited = new Set<number>();
-            (request.tasks ?? []).forEach((t) => { if (t.step?.order != null) visited.add(t.step.order); });
-            (request.approvals ?? []).forEach((a) => { if (a.stepOrder != null) visited.add(a.stepOrder); });
-            const steps = request.flow?.steps ?? [];
-            return steps.map((step, idx) => {
-              // Comparar por ORDER (não pelo índice): os orders são espaçados (0/10/.../80).
-              const isCurrent = step.order === request.currentStep;
-              const isPast = step.order < request.currentStep;
-              const isDone = isPast && visited.has(step.order);
-              const isSkipped = isPast && !visited.has(step.order);
-              const cls = isDone ? 'bg-green-100 text-green-800'
-                : isCurrent ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium'
-                : isSkipped ? 'bg-gray-50 text-gray-400 border border-dashed border-gray-300'
-                : 'bg-gray-100 text-gray-500';
-              const icon = isDone ? '✓' : isCurrent ? '→' : isSkipped ? '⤼' : `${idx + 1}`;
-              return (
-                <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
-                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${cls}`}>
-                    <span>{icon}</span>
-                    <span>{step.name}</span>
-                    {isSkipped && <span className="text-[10px] uppercase tracking-wide">(pulada)</span>}
-                  </div>
-                  {idx < steps.length - 1 && <span className="text-gray-300">→</span>}
-                </div>
-              );
-            });
+            const stepsList = request.flow?.steps ?? [];
+            const pos = stepsList.findIndex((s) => s.order === request.currentStep);
+            if (stepsList.length === 0) return null;
+            return <span className="text-xs text-gray-400 flex-shrink-0">{Math.max(pos, 0) + 1}/{stepsList.length} etapas</span>;
           })()}
+        </div>
+        <div className="relative">
+          <div className="flex items-center gap-2 overflow-x-auto pb-2">
+            {(() => {
+              // Etapas EFETIVAMENTE percorridas (têm tarefa criada) ou com aprovação
+              // registrada — usado para distinguir "concluída" de "pulada" (branch).
+              const visited = new Set<number>();
+              (request.tasks ?? []).forEach((t) => { if (t.step?.order != null) visited.add(t.step.order); });
+              (request.approvals ?? []).forEach((a) => { if (a.stepOrder != null) visited.add(a.stepOrder); });
+              const steps = request.flow?.steps ?? [];
+              return steps.map((step, idx) => {
+                // Comparar por ORDER (não pelo índice): os orders são espaçados (0/10/.../80).
+                const isCurrent = step.order === request.currentStep;
+                const isPast = step.order < request.currentStep;
+                const isDone = isPast && visited.has(step.order);
+                const isSkipped = isPast && !visited.has(step.order);
+                const cls = isDone ? 'bg-green-100 text-green-800'
+                  : isCurrent ? 'bg-golplus-blue-100 text-golplus-blue-800 font-medium'
+                  : isSkipped ? 'bg-gray-50 text-gray-400 border border-dashed border-gray-300'
+                  : 'bg-gray-100 text-gray-500';
+                const icon = isDone ? '✓' : isCurrent ? '→' : isSkipped ? '⤼' : `${idx + 1}`;
+                return (
+                  <div key={step.id} className="flex items-center gap-2 flex-shrink-0">
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${cls}`}>
+                      <span>{icon}</span>
+                      <span>{step.name}</span>
+                      {isSkipped && <span className="text-[10px] uppercase tracking-wide">(pulada)</span>}
+                    </div>
+                    {idx < steps.length - 1 && <span className="text-gray-300">→</span>}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+          {/* Fade à direita: sinaliza que há mais etapas fora da área visível (scroll). */}
+          <div className="pointer-events-none absolute right-0 top-0 bottom-2 w-8 bg-gradient-to-l from-white to-transparent" />
         </div>
       </div>
 
@@ -753,7 +780,7 @@ export default function RequestDetail() {
                           {fv.field.label}
                           {fv.field.sensitiveType && <span className="ml-1 text-gray-300" title="Dado sensível">🔒</span>}:
                         </dt>
-                        <dd className="text-sm text-gray-900 break-all">{displayFieldValue(fv)}</dd>
+                        <dd className="text-sm text-gray-900 break-words">{displayFieldValue(fv)}</dd>
                       </div>
                     ))}
                   </dl>
@@ -858,7 +885,7 @@ export default function RequestDetail() {
                 <div key={log.id} className="flex gap-4">
                   <div className="flex-shrink-0 w-2 h-2 mt-2 rounded-full bg-golplus-blue-400"></div>
                   <div>
-                    <p className="text-sm text-gray-900"><span className="font-medium">{log.userName}</span> · {log.action}</p>
+                    <p className="text-sm text-gray-900"><span className="font-medium">{log.userName}</span> · <span title={log.action}>{auditActionLabel(log.action)}</span></p>
                     {log.details && <p className="text-xs text-gray-500 mt-0.5">{log.details}</p>}
                     <p className="text-xs text-gray-400 mt-0.5">{format(new Date(log.createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
                   </div>

@@ -186,6 +186,14 @@ export default function NewRequest() {
   const isFinancial = ['PAYMENT', 'PURCHASE'].includes(selectedType);
   const isPayment = selectedType === 'PAYMENT';
   const categoryDef = getCategory(paymentCategory);
+  // Na vaga (ONBOARDING) não há campo "Título": o backend deriva um a partir do
+  // tipo de vaga + cargo no submit (ver createMutation). Espelha a mesma lógica
+  // aqui só para exibir a prévia correta na Confirmação (passo 5).
+  const vacancyLabel = VACANCY_TYPES.find((v) => v.value === vacancyType)?.label || 'Vaga';
+  const cargoPreview = dvByKey('cargo').trim();
+  const derivedTitle = selectedType === 'ONBOARDING'
+    ? (cargoPreview ? `${vacancyLabel} — ${cargoPreview}` : vacancyLabel)
+    : form.title;
 
   const canNext = () => {
     if (step === 1) return !!selectedType;
@@ -225,7 +233,7 @@ export default function NewRequest() {
       <Header title="Nova Solicitação" subtitle="Crie uma nova solicitação de aprovação" />
 
       {/* Progress */}
-      <div className="flex items-center gap-2 mb-8">
+      <div className="flex flex-wrap items-center gap-2 mb-8">
         {Array.from({ length: totalSteps }, (_, i) => i + 1).map((n) => (
           <div key={n} className="flex items-center gap-2">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${n < step ? 'bg-golplus-blue-600 text-white' : n === step ? 'bg-golplus-blue-600 text-white ring-4 ring-golplus-blue-100' : 'bg-gray-200 text-gray-500'}`}>
@@ -234,7 +242,7 @@ export default function NewRequest() {
             {n < totalSteps && <div className={`h-0.5 w-8 ${n < step ? 'bg-golplus-blue-600' : 'bg-gray-200'}`} />}
           </div>
         ))}
-        <div className="ml-4 text-sm text-gray-500">
+        <div className="basis-full sm:basis-auto sm:ml-4 text-sm text-gray-500">
           {['Tipo de Fluxo', 'Selecionar Modelo', 'Detalhes', 'Anexos', 'Confirmação'][step - 1]}
         </div>
       </div>
@@ -500,7 +508,16 @@ export default function NewRequest() {
             <div className="bg-gray-50 rounded-xl p-5 space-y-3">
               <div className="flex justify-between text-sm"><span className="text-gray-500">Tipo:</span><FlowTypeBadge type={selectedType} /></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Fluxo:</span><span className="font-medium">{selectedFlow?.name}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-500">Título:</span><span className="font-medium">{form.title}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Título:</span><span className="font-medium">{derivedTitle || '—'}</span></div>
+              {selectedType === 'ONBOARDING' && vacancyType && (
+                <div className="flex justify-between text-sm"><span className="text-gray-500">Tipo de vaga:</span><span className="font-medium">{vacancyLabel}</span></div>
+              )}
+              {selectedType === 'ONBOARDING' && cargoPreview && (
+                <div className="flex justify-between text-sm"><span className="text-gray-500">Cargo:</span><span className="font-medium">{cargoPreview}</span></div>
+              )}
+              {selectedType === 'ONBOARDING' && selectedResourceIds.length > 0 && (
+                <div className="flex justify-between text-sm"><span className="text-gray-500">Equipamentos:</span><span className="font-medium">{selectedResourceIds.length} item(ns)</span></div>
+              )}
               {isPayment && categoryDef && <div className="flex justify-between text-sm"><span className="text-gray-500">Categoria:</span><span className="font-medium">{categoryDef.icon} {categoryDef.label}</span></div>}
               {form.amount && <div className="flex justify-between text-sm"><span className="text-gray-500">Valor:</span><span className="font-medium text-golplus-blue-700">R$ {parseFloat(form.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>}
               {form.targetEmployee && <div className="flex justify-between text-sm"><span className="text-gray-500">Protetor:</span><span className="font-medium">{form.targetEmployee}</span></div>}

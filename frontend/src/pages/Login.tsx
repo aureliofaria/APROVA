@@ -82,7 +82,7 @@ export default function Login() {
                 key={e}
                 type="button"
                 onClick={() => { setEmail(e); setPassword('senha123'); }}
-                className="w-full text-left text-xs text-gray-600 hover:text-golplus-blue-600 py-0.5"
+                className="w-full text-left text-xs text-gray-600 hover:text-golplus-blue-600 py-2"
               >
                 {e} <span className="text-gray-400">({r})</span>
               </button>

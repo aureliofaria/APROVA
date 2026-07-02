@@ -90,32 +90,34 @@ function AssetsTab({ qc }: { qc: any }) {
 
       {filtered.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-2 text-left">Etiqueta</th>
-                <th className="px-4 py-2 text-left">Item</th>
-                <th className="px-4 py-2 text-left">Status</th>
-                <th className="px-4 py-2 text-left">Localização</th>
-                <th className="px-4 py-2 text-left">Valor NF</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((a) => (
-                <tr key={a.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium text-gray-900">{a.tag || '—'}</td>
-                  <td className="px-4 py-2 text-gray-700">{a.item?.name}{a.serialNumber ? <span className="text-gray-400"> · {a.serialNumber}</span> : null}</td>
-                  <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(a.status).cls}`}>{statusBadge(a.status).label}</span></td>
-                  <td className="px-4 py-2 text-gray-600">{assetLocation(a)}</td>
-                  <td className="px-4 py-2 text-gray-600">{fmtMoney(a.invoiceValueCents)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => setMoving(a)} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 font-medium">Movimentar</button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr>
+                  <th className="px-4 py-2 text-left">Etiqueta</th>
+                  <th className="px-4 py-2 text-left">Item</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 text-left">Localização</th>
+                  <th className="px-4 py-2 text-left">Valor NF</th>
+                  <th className="px-4 py-2"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filtered.map((a) => (
+                  <tr key={a.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">{a.tag || '—'}</td>
+                    <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{a.item?.name}{a.serialNumber ? <span className="text-gray-400"> · {a.serialNumber}</span> : null}</td>
+                    <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(a.status).cls}`}>{statusBadge(a.status).label}</span></td>
+                    <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{assetLocation(a)}</td>
+                    <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{fmtMoney(a.invoiceValueCents)}</td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap">
+                      <button onClick={() => setMoving(a)} className="text-xs text-golplus-blue-600 hover:text-golplus-blue-800 font-medium">Movimentar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -268,22 +270,24 @@ function CatalogTab({ qc }: { qc: any }) {
       {isLoading && <div className="text-sm text-gray-400 text-center py-8">Carregando…</div>}
       {!isLoading && items.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-              <tr><th className="px-4 py-2 text-left">Código</th><th className="px-4 py-2 text-left">Nome</th><th className="px-4 py-2 text-left">Tipo</th><th className="px-4 py-2 text-left">Categoria</th><th className="px-4 py-2 text-left">Marca/Modelo</th></tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {items.map((i) => (
-                <tr key={i.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium text-gray-900">{i.code}</td>
-                  <td className="px-4 py-2 text-gray-700">{i.name}</td>
-                  <td className="px-4 py-2 text-gray-600">{i.type}</td>
-                  <td className="px-4 py-2 text-gray-600">{i.category}</td>
-                  <td className="px-4 py-2 text-gray-500">{[i.brand, i.model].filter(Boolean).join(' ') || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr><th className="px-4 py-2 text-left">Código</th><th className="px-4 py-2 text-left">Nome</th><th className="px-4 py-2 text-left">Tipo</th><th className="px-4 py-2 text-left">Categoria</th><th className="px-4 py-2 text-left">Marca/Modelo</th></tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {items.map((i) => (
+                  <tr key={i.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">{i.code}</td>
+                    <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{i.name}</td>
+                    <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{i.type}</td>
+                    <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{i.category}</td>
+                    <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{[i.brand, i.model].filter(Boolean).join(' ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -300,23 +304,25 @@ function MovementsTab() {
       )}
       {movements.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-              <tr><th className="px-4 py-2 text-left">Data</th><th className="px-4 py-2 text-left">Ativo</th><th className="px-4 py-2 text-left">Tipo</th><th className="px-4 py-2 text-left">Status</th><th className="px-4 py-2 text-left">Motivo</th><th className="px-4 py-2 text-left">Solicitação</th></tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {movements.map((m) => (
-                <tr key={m.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 text-gray-500">{new Date(m.movementDate).toLocaleDateString('pt-BR')}</td>
-                  <td className="px-4 py-2 text-gray-700">{m.asset?.tag || m.asset?.item?.name || m.assetId.slice(0, 8)}</td>
-                  <td className="px-4 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">{m.type}</span></td>
-                  <td className="px-4 py-2 text-gray-500 text-xs">{m.previousStatus || '—'} → {m.newStatus || '—'}</td>
-                  <td className="px-4 py-2 text-gray-500">{m.reason || '—'}</td>
-                  <td className="px-4 py-2 text-gray-500">{m.requestId ? <a href={`/requests/${m.requestId}`} className="text-golplus-blue-600 hover:underline">ver</a> : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr><th className="px-4 py-2 text-left">Data</th><th className="px-4 py-2 text-left">Ativo</th><th className="px-4 py-2 text-left">Tipo</th><th className="px-4 py-2 text-left">Status</th><th className="px-4 py-2 text-left">Motivo</th><th className="px-4 py-2 text-left">Solicitação</th></tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {movements.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{new Date(m.movementDate).toLocaleDateString('pt-BR')}</td>
+                    <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{m.asset?.tag || m.asset?.item?.name || m.assetId.slice(0, 8)}</td>
+                    <td className="px-4 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 whitespace-nowrap">{m.type}</span></td>
+                    <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{m.previousStatus || '—'} → {m.newStatus || '—'}</td>
+                    <td className="px-4 py-2 text-gray-500">{m.reason || '—'}</td>
+                    <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{m.requestId ? <a href={`/requests/${m.requestId}`} className="text-golplus-blue-600 hover:underline">ver</a> : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
