@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, handleUpload } from '../middleware/upload';
-import { createRequestTasks, advanceRequest, publishWorkflowEvent, activeRound } from '../services/workflow';
+import { createRequestTasks, advanceRequest, publishWorkflowEvent, activeRound, blockRequest, describeStarvedStep } from '../services/workflow';
 import { Prisma } from '@prisma/client';
 import { canOpenRequestType } from '../lib/users';
 import { APPROVER_ROLES } from '../config';
@@ -344,7 +344,13 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         });
       }
 
-      await createRequestTasks(created.id, flowId, 0, tx);
+      const initResult = await createRequestTasks(created.id, flowId, 0, tx);
+      if (initResult.starvedStepId) {
+        // Etapa 0 aplicável sem elegível (raro, mas possível — ex.: alçada sem
+        // usuário ativo já na submissão): trava em vez de nascer "fantasma" em
+        // IN_PROGRESS sem nenhum responsável.
+        await blockRequest(tx, { id: created.id, initiatorId: req.user.id, title }, initResult.starvedStepId);
+      }
       return created;
     });
 
@@ -793,7 +799,13 @@ router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Respons
         });
 
         // Recria as tarefas da etapa de retorno (assignees pela definição da etapa).
-        await createRequestTasks(request.id, request.flowId, returnStep, tx);
+        const resubmitResult = await createRequestTasks(request.id, request.flowId, returnStep, tx);
+        if (resubmitResult.starvedStepId) {
+          // A etapa de retorno ficou sem elegível (ex.: quem tinha alçada foi
+          // desativado entre a correção e o reenvio) — trava em vez de deixar
+          // o reenvio "concluído" sem nenhum aprovador com tarefa.
+          await blockRequest(tx, { id: request.id, initiatorId: request.initiatorId, title: request.title }, resubmitResult.starvedStepId);
+        }
 
         await tx.auditLog.create({
           data: {
@@ -814,6 +826,69 @@ router.post('/:id/resubmit', authenticate, async (req: AuthRequest, res: Respons
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Erro ao reenviar solicitação' });
+  }
+});
+
+// ===========================================================================
+// Destrave de solicitação BLOCKED (Fix 1 — auditoria Lupa). Uma etapa
+// aplicável que resolveu ZERO elegíveis (ex.: alçada cujo papel não tem
+// usuário ativo) trava a solicitação em vez de pular/concluir em silêncio.
+// Só ADMIN pode reprocessar — tipicamente após corrigir o cadastro (ativar
+// alguém no papel, atribuir membro ao setor etc.). Reexecuta createRequestTasks
+// na etapa atual: se resolver algum elegível, volta a IN_PROGRESS; senão,
+// permanece BLOCKED e devolve 409 com o motivo (papel/setor vazio).
+// ===========================================================================
+router.post('/:id/retry-step', authenticate, async (req: AuthRequest, res: Response) => {
+  if (req.user.role !== 'ADMIN') { res.status(403).json({ error: 'Acesso negado: apenas ADMIN pode reprocessar a etapa' }); return; }
+  try {
+    const request = await prisma.request.findUnique({
+      where: { id: req.params.id },
+      include: { flow: { include: { steps: { orderBy: { order: 'asc' } } } } },
+    });
+    if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
+    if (request.status !== 'BLOCKED') {
+      res.status(409).json({ error: 'Solicitação não está travada' }); return;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const { created, starvedStepId } = await createRequestTasks(request.id, request.flowId, request.currentStep, tx);
+      if (created > 0 && !starvedStepId) {
+        const step = request.flow.steps.find((s) => s.order === request.currentStep);
+        await tx.request.update({
+          where: { id: request.id },
+          data: { status: 'IN_PROGRESS', statusLabel: step?.statusLabel ?? null },
+        });
+        await tx.auditLog.create({
+          data: {
+            requestId: request.id, userId: req.user.id, userName: req.user.name,
+            action: 'REQUEST_UNBLOCKED',
+            details: `Etapa reprocessada com sucesso (${created} tarefa(s) criada(s))`,
+          },
+        });
+        return { ok: true as const };
+      }
+      const detail = await describeStarvedStep(
+        tx,
+        starvedStepId ?? request.flow.steps.find((s) => s.order === request.currentStep)?.id ?? null,
+      );
+      await tx.auditLog.create({
+        data: {
+          requestId: request.id, userId: req.user.id, userName: req.user.name,
+          action: 'RETRY_STEP_FAILED',
+          details: `Reprocessamento não resolveu elegíveis — ${detail}`,
+        },
+      });
+      return { ok: false as const, detail };
+    });
+
+    if (!result.ok) {
+      res.status(409).json({ error: `Ainda sem usuário elegível: ${result.detail}` });
+      return;
+    }
+    const updated = await prisma.request.findUnique({ where: { id: request.id } });
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'Erro ao reprocessar etapa' });
   }
 });
 

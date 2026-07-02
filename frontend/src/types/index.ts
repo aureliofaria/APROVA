@@ -351,7 +351,9 @@ export type RequestStatus =
   | 'REJECTED'
   | 'RETURNED'
   | 'COMPLETED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  // Etapa aplicável sem aprovador ativo — trava até um ADMIN reprocessar.
+  | 'BLOCKED';
 
 // Ações de decisão rica do aprovador (POST /requests/:id/decision).
 export type DecisionAction = 'DEFER' | 'REJECT' | 'REQUEST_CORRECTION' | 'REQUEST_INFO' | 'FORWARD';
