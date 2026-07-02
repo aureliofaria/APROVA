@@ -72,7 +72,13 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     if (isAdmin && departmentId !== undefined) data.departmentId = departmentId;
     if (isAdmin && isActive !== undefined) data.isActive = isActive;
     if (isAdmin && requestPermissions !== undefined) data.requestPermissions = normalizeRequestPermissions(requestPermissions);
-    if (password) data.passwordHash = await bcrypt.hash(password, 10);
+    // Definir uma senha (própria ou por um ADMIN) resolve o "needsPasswordSetup"
+    // de contas criadas pela sincronização M365/Entra ID — a partir daqui o
+    // login por senha funciona normalmente.
+    if (password) {
+      data.passwordHash = await bcrypt.hash(password, 10);
+      data.needsPasswordSetup = false;
+    }
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data,
