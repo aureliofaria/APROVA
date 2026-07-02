@@ -169,14 +169,23 @@ async function loadOwnedTask(req: AuthRequest, res: Response) {
   return task;
 }
 
+// Fix 3 (auditoria Lupa): este PUT genérico aceitava `status` arbitrário no
+// corpo — dava para pular direto para COMPLETED (ou qualquer outro valor) sem
+// passar pelas checagens de /complete (anexo obrigatório, campos obrigatórios,
+// checklist) nem pelas de /decision (SoD, alçada). Fecha a porta: só aceita
+// `notes`. Mudar status é SEMPRE via /complete, /decision, /claim ou /reject.
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const owned = await loadOwnedTask(req, res);
     if (!owned) return;
-    const { status, notes } = req.body;
+    if ('status' in req.body) {
+      res.status(400).json({ error: 'Não é possível alterar o status por aqui — use POST /:id/complete (concluir) ou POST /requests/:id/decision (decisão de aprovação)' });
+      return;
+    }
+    const { notes } = req.body;
     const task = await prisma.requestTask.update({
       where: { id: req.params.id },
-      data: { status, notes },
+      data: { notes },
     });
     res.json(task);
   } catch {
