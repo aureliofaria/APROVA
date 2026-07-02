@@ -187,15 +187,17 @@ describe('pagamentos — dupla decisão / replay', () => {
 describe('pagamentos — IDOR', () => {
   beforeEach(resetDb);
 
-  it('USER não envolvido não lê pagamento alheio (403)', async () => {
+  it('USER não envolvido não lê pagamento alheio (404 — oráculo de existência uniforme, Fix 3)', async () => {
     const initiator = await makeUser('USER');
     const intruso = await makeUser('USER');
     const flow = await makePaymentFlow();
     const created = await request(app).post('/api/requests').set(auth(tokenFor(initiator.id))).send(validPayment(flow.id));
     const reqId = created.body.id;
-    expect((await request(app).get(`/api/requests/${reqId}`).set(auth(tokenFor(intruso.id)))).status).toBe(403);
-    expect((await request(app).get(`/api/requests/${reqId}/attachments`).set(auth(tokenFor(intruso.id)))).status).toBe(403);
-    expect((await request(app).get(`/api/requests/${reqId}/audit`).set(auth(tokenFor(intruso.id)))).status).toBe(403);
+    // Leitura por id sem vínculo devolve 404 (não 403): não revela ao forasteiro
+    // que a solicitação existe.
+    expect((await request(app).get(`/api/requests/${reqId}`).set(auth(tokenFor(intruso.id)))).status).toBe(404);
+    expect((await request(app).get(`/api/requests/${reqId}/attachments`).set(auth(tokenFor(intruso.id)))).status).toBe(404);
+    expect((await request(app).get(`/api/requests/${reqId}/audit`).set(auth(tokenFor(intruso.id)))).status).toBe(404);
   });
 
   it('o iniciador lê a própria solicitação (200)', async () => {
@@ -214,8 +216,9 @@ describe('pagamentos — IDOR', () => {
     const flow = await makePaymentFlow();
     const created = await request(app).post('/api/requests').set(auth(tokenFor(initiator.id))).send(validPayment(flow.id));
     const reqId = created.body.id;
-    // Sem envolvimento: 403 (sem visão ampla por papel).
-    expect((await request(app).get(`/api/requests/${reqId}`).set(auth(tokenFor(fin.id)))).status).toBe(403);
+    // Sem envolvimento: 404 (sem visão ampla por papel; oráculo de existência
+    // uniforme, Fix 3 — não revela que a solicitação existe a quem não a vê).
+    expect((await request(app).get(`/api/requests/${reqId}`).set(auth(tokenFor(fin.id)))).status).toBe(404);
     // Roteia a tarefa de Processamento Financeiro (etapa 2) ao FINANCE → passa a ver.
     const step2 = await prisma.flowStep.findFirst({ where: { flowTemplateId: flow.id, order: 2 } });
     await prisma.requestTask.create({ data: { requestId: reqId, stepId: step2!.id, assigneeId: fin.id, title: 'Financeiro' } });

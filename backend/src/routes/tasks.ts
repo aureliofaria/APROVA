@@ -128,8 +128,10 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
     // setor/hierarquia. Removido o antigo bypass por papel (WIDE_VIEW_ROLES:
     // ADMIN/MANAGER/FINANCE/HR viam QUALQUER tarefa sem vínculo — furo de
     // visibilidade que deixava até o valor/anexos do pedido embutido vazarem).
+    // Oráculo de existência uniforme: sem vínculo devolve o MESMO 404 de
+    // "tarefa não existe" — não revela a um forasteiro que a tarefa existe.
     if (!(await canViewRequest(req.user, task.request))) {
-      res.status(403).json({ error: 'Acesso negado' });
+      res.status(404).json({ error: 'Tarefa não encontrada' });
       return;
     }
     res.json(task);

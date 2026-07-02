@@ -121,7 +121,9 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
       },
     });
     if (!request) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!(await canViewRequest(req.user, request))) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    // Oráculo de existência uniforme (Fix 3): sem vínculo devolve o MESMO 404 de
+    // "não existe" — não revela a um forasteiro que a solicitação existe.
+    if (!(await canViewRequest(req.user, request))) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     // REF.3: resolve o acesso sensível UMA vez e injeta nos dois mascaramentos
     // (campos de 1ª classe da Request + valores dinâmicos do Passo 7).
     const allowed = await resolveViewerSensitiveAccess(req.user, prisma);
@@ -1024,7 +1026,8 @@ router.get('/:id/attachments', authenticate, async (req: AuthRequest, res: Respo
   try {
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!(await canViewRequest(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    // Oráculo de existência uniforme (Fix 3): mesmo 404 sem vínculo.
+    if (!(await canViewRequest(req.user, inv))) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     const attachments = await prisma.attachment.findMany({
       where: { requestId: req.params.id },
       orderBy: { createdAt: 'desc' },
@@ -1039,7 +1042,8 @@ router.get('/:id/audit', authenticate, async (req: AuthRequest, res: Response) =
   try {
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!(await canViewRequest(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    // Oráculo de existência uniforme (Fix 3): mesmo 404 sem vínculo.
+    if (!(await canViewRequest(req.user, inv))) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     const logs = await prisma.auditLog.findMany({
       where: { requestId: req.params.id },
       orderBy: { createdAt: 'asc' },
@@ -1134,7 +1138,8 @@ router.get('/:id/comments', authenticate, async (req: AuthRequest, res: Response
   try {
     const inv = await loadInvolvement(req.params.id);
     if (!inv) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
-    if (!(await canAccessComments(req.user, inv))) { res.status(403).json({ error: 'Acesso negado' }); return; }
+    // Oráculo de existência uniforme (Fix 3): mesmo 404 sem vínculo.
+    if (!(await canAccessComments(req.user, inv))) { res.status(404).json({ error: 'Solicitação não encontrada' }); return; }
     const comments = await prisma.comment.findMany({
       where: { requestId: req.params.id },
       include: { author: { select: { id: true, name: true } } },

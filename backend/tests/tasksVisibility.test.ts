@@ -5,6 +5,8 @@
 // inconsistente com GET /requests/:id, que corretamente nega acesso fora do
 // escopo. Este arquivo prova que o gate agora usa o MESMO predicado
 // (lib/visibility::canViewRequest) das demais rotas de leitura.
+// FIX 3 (oráculo de existência): sem vínculo devolve 404, o MESMO status de
+// "tarefa não existe" — não revela a um forasteiro que a tarefa existe.
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../src/index';
@@ -27,7 +29,7 @@ async function makeRequestWithTask(initiatorId: string, flowId: string, assignee
 describe('FIX 2 — GET /api/tasks/:id respeita o vínculo (sem bypass por papel)', () => {
   beforeEach(resetDb);
 
-  it('MANAGER sem vínculo com a solicitação: 403 (mesmo sendo papel de "visão ampla" antigo)', async () => {
+  it('MANAGER sem vínculo com a solicitação: 404 (mesmo sendo papel de "visão ampla" antigo)', async () => {
     const initiator = await makeUser('USER');
     const assignee = await makeUser('USER', 'assignee');
     const manager = await makeUser('MANAGER');
@@ -35,10 +37,10 @@ describe('FIX 2 — GET /api/tasks/:id respeita o vínculo (sem bypass por papel
     const { task } = await makeRequestWithTask(initiator.id, flow.id, assignee.id);
 
     const res = await request(app).get(`/api/tasks/${task.id}`).set(auth(tokenFor(manager.id)));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
-  it('FINANCE sem vínculo: 403', async () => {
+  it('FINANCE sem vínculo: 404', async () => {
     const initiator = await makeUser('USER');
     const assignee = await makeUser('USER', 'assignee2');
     const finance = await makeUser('FINANCE');
@@ -46,10 +48,10 @@ describe('FIX 2 — GET /api/tasks/:id respeita o vínculo (sem bypass por papel
     const { task } = await makeRequestWithTask(initiator.id, flow.id, assignee.id);
 
     const res = await request(app).get(`/api/tasks/${task.id}`).set(auth(tokenFor(finance.id)));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
-  it('HR sem vínculo: 403', async () => {
+  it('HR sem vínculo: 404', async () => {
     const initiator = await makeUser('USER');
     const assignee = await makeUser('USER', 'assignee3');
     const hr = await makeUser('HR');
@@ -57,7 +59,7 @@ describe('FIX 2 — GET /api/tasks/:id respeita o vínculo (sem bypass por papel
     const { task } = await makeRequestWithTask(initiator.id, flow.id, assignee.id);
 
     const res = await request(app).get(`/api/tasks/${task.id}`).set(auth(tokenFor(hr.id)));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it('tarefa inexistente: 404 (comportamento inalterado)', async () => {
